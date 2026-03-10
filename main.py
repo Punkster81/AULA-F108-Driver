@@ -23,22 +23,26 @@ class KeyboardAPI:
 
     # ── Connection ─────────────────────────────────────────────────────────────
     def connect(self):
-        """Try to connect to the keyboard. Returns {ok, message}."""
+        """
+        Try to connect to the keyboard.
+        Returns {ok, message, colors} where colors is {hex_idx: [r,g,b]} of
+        the keyboard's current LED state (populated on success).
+        """
         try:
             from aula_f108_pro_final import AulaF108Pro
             with self._lock:
                 if self._kb:
                     self._kb.disconnect()
                 self._kb = AulaF108Pro()
-                ok = self._kb.connect()
-                if ok:
+                colors = self._kb.connect()
+                if colors is not None:
                     self._kb.start()
-                    return {'ok': True,  'message': 'Connected — VID:0C45 PID:800A'}
+                    return {'ok': True, 'message': 'Connected — VID:0C45 PID:800A', 'colors': colors}
                 else:
                     self._kb = None
-                    return {'ok': False, 'message': 'Keyboard not found. Is AULA software closed?'}
+                    return {'ok': False, 'message': 'Keyboard not found. Is AULA software closed?', 'colors': {}}
         except Exception as e:
-            return {'ok': False, 'message': str(e)}
+            return {'ok': False, 'message': str(e), 'colors': {}}
 
     def disconnect(self):
         with self._lock:
@@ -104,9 +108,76 @@ class KeyboardAPI:
                 return {'ok': False, 'message': str(e)}
 
 
+# ── Animation file helpers ────────────────────────────────────────────────────
+def animations_dir():
+    """Returns (and creates if needed) the 'animations' folder next to main.py / the exe."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, 'animations')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+class AnimationAPI:
+    def save_animation(self, name, data):
+        """
+        Save animation JSON to <app_dir>/animations/<name>.json
+        data: the full animation object (dict)
+        Returns {ok, path}
+        """
+        try:
+            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'animation'
+            fname = safe.replace(' ', '_').lower() + '.json'
+            path = os.path.join(animations_dir(), fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def list_animations(self):
+        """
+        Scan <app_dir>/animations/ and return list of animation objects.
+        Returns {ok, animations: [{name, filename, frames, loop, ...}]}
+        """
+        try:
+            results = []
+            d = animations_dir()
+            for fname in sorted(os.listdir(d)):
+                if not fname.lower().endswith('.json'):
+                    continue
+                try:
+                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    data['_filename'] = fname
+                    results.append(data)
+                except Exception:
+                    pass
+            return {'ok': True, 'animations': results}
+        except Exception as e:
+            return {'ok': False, 'animations': [], 'message': str(e)}
+
+    def delete_animation(self, filename):
+        """Delete <app_dir>/animations/<filename>. Returns {ok}."""
+        try:
+            path = os.path.join(animations_dir(), os.path.basename(filename))
+            if os.path.exists(path):
+                os.remove(path)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+
 # ── App entry point ───────────────────────────────────────────────────────────
 def main():
-    api = KeyboardAPI()
+    kb_api = KeyboardAPI()
+    anim_api = AnimationAPI()
+
+    # Merge both APIs into a single object for pywebview
+    class CombinedAPI(KeyboardAPI, AnimationAPI):
+        pass
+    api = CombinedAPI()
 
     window = webview.create_window(
         title     = 'AULA F108 Pro — RGB Driver',

@@ -368,7 +368,7 @@ function playNextFrame() {
 }
 
 // ── Save / Load JSON ──────────────────────────────────────────────────────────
-function saveAnimation() {
+async function saveAnimation() {
     const name = document.getElementById('animNameInput').value.trim() || 'animation';
     if (animFrames.length === 0) { toast('No frames to save'); return; }
     const data = {
@@ -383,18 +383,38 @@ function saveAnimation() {
             )
         }))
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name.replace(/[^a-z0-9_-]/gi, '_').toLowerCase() + '.json';
-    a.click();
-    toast(`Saved "${name}"`);
-    // Also store in memory for quick reload
-    savedAnimations[name] = data;
-    renderSavedList();
+
+    if (window.pywebview && window.pywebview.api) {
+        const r = await window.pywebview.api.save_animation(name, data);
+        if (r.ok) {
+            toast(`Saved "${name}" to animations/`);
+            await loadAnimationsFromDisk();
+        } else {
+            toast('Save failed: ' + (r.message || 'unknown error'));
+        }
+    } else {
+        // Fallback: browser download in demo mode
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name.replace(/[^a-z0-9_-]/gi, '_').toLowerCase() + '.json';
+        a.click();
+        toast(`Saved "${name}"`);
+    }
 }
 
 let savedAnimations = {};
+
+async function loadAnimationsFromDisk() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const r = await window.pywebview.api.list_animations();
+    if (!r.ok) return;
+    savedAnimations = {};
+    r.animations.forEach(data => {
+        savedAnimations[data._filename] = data;
+    });
+    renderSavedList();
+}
 
 function loadAnimationFile(event) {
     const file = event.target.files[0];
@@ -424,22 +444,34 @@ function loadAnimationData(data) {
     renderTimeline();
     if (animFrames.length > 0) selectAnimFrame(0);
     updateAnimFrameCount();
-    savedAnimations[data.name] = data;
-    renderSavedList();
+}
+
+async function deleteAnimation(filename) {
+    if (!window.pywebview || !window.pywebview.api) return;
+    await window.pywebview.api.delete_animation(filename);
+    await loadAnimationsFromDisk();
 }
 
 function renderSavedList() {
     const el = document.getElementById('savedAnimList');
     el.innerHTML = '';
-    Object.entries(savedAnimations).forEach(([name, data]) => {
+    const entries = Object.entries(savedAnimations);
+    if (entries.length === 0) {
+        el.innerHTML = '<div style="font-size:0.6rem;color:var(--dim)">No saved animations</div>';
+        return;
+    }
+    entries.forEach(([filename, data]) => {
+        const name = data.name || filename;
         const item = document.createElement('div');
         item.className = 'saved-anim-item';
         item.innerHTML = `
-  <span style="flex:1">${name}</span>
-  <span style="font-size:0.58rem;color:var(--dim)">${data.frames?.length || 0}f</span>
-  <button class="load-btn" onclick="loadAnimationData(savedAnimations['${name}'])">LOAD</button>
-  <button class="del-btn" onclick="delete savedAnimations['${name}'];renderSavedList()">✕</button>
+  <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${filename}">${name}</span>
+  <span style="font-size:0.58rem;color:var(--dim);flex-shrink:0">${data.frames?.length || 0}f</span>
+  <button class="load-btn">LOAD</button>
+  <button class="del-btn">✕</button>
 `;
+        item.querySelector('.load-btn').addEventListener('click', () => loadAnimationData(data));
+        item.querySelector('.del-btn').addEventListener('click', () => deleteAnimation(filename));
         el.appendChild(item);
     });
 }
@@ -449,6 +481,7 @@ function renderSavedList() {
 // ── Panel open/close ──────────────────────────────────────────────────────────
 function openAnimPanel() {
     document.getElementById('animPanel').classList.add('open');
+    loadAnimationsFromDisk();
 }
 function closeAnimPanel() {
     stopPreview();

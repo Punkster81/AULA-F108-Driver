@@ -219,7 +219,10 @@ class AulaF108Pro:
         self._thread  = None
 
     def connect(self):
-        """Open device and perform realtime handshake. Returns True on success."""
+        """Open device and perform realtime handshake.
+        Returns empty dict {} on success (colors unknown until user applies them),
+        or None on failure.
+        """
         for d in hidapi.enumerate(0x0C45, 0x800A):
             if d['usage_page'] == 0xff13:
                 path = d['path']
@@ -228,9 +231,9 @@ class AulaF108Pro:
                 print(f"Connected: {path}")
                 _handshake(self._h)
                 print("Ready.")
-                return True
+                return {}
         print("Device not found. Is AULA software closed?")
-        return False
+        return None
 
     def disconnect(self):
         self.stop()
