@@ -89,7 +89,6 @@ function miniPaintKey(idx) {
 
     renderMiniKey(idx, r, g, b);
     updateFrameThumb(activeAnimFrame);
-    updateAnimPyOutput();
     updateTotalDuration();
 }
 
@@ -140,7 +139,6 @@ function updateFrameDuration() {
         thumbs[activeAnimFrame].querySelector('.frame-duration').textContent = animFrames[activeAnimFrame].duration + 'ms';
     }
     updateTotalDuration();
-    updateAnimPyOutput();
 }
 
 function duplicateFrame() {
@@ -157,7 +155,6 @@ function clearFrame() {
     animFrames[activeAnimFrame].colors = {};
     loadFrameIntoMini(activeAnimFrame);
     updateFrameThumb(activeAnimFrame);
-    updateAnimPyOutput();
     toast('Frame cleared');
 }
 
@@ -169,7 +166,6 @@ function deleteFrame() {
     renderTimeline();
     if (animFrames.length > 0) selectAnimFrame(newActive);
     updateAnimFrameCount();
-    updateAnimPyOutput();
 }
 
 function copyFromMain() {
@@ -177,7 +173,6 @@ function copyFromMain() {
     animFrames[activeAnimFrame].colors = JSON.parse(JSON.stringify(keyColors));
     loadFrameIntoMini(activeAnimFrame);
     updateFrameThumb(activeAnimFrame);
-    updateAnimPyOutput();
     toast('Copied from main view');
 }
 
@@ -358,6 +353,16 @@ function playNextFrame() {
     const frame = animFrames[previewFrameIdx];
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
     loadFrameIntoMini(previewFrameIdx);
+
+    // Push frame to keyboard if connected
+    if (window.pywebview && window.pywebview.api) {
+        const payload = {};
+        Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => {
+            if (r || g || b) payload[idx] = [r, g, b];
+        });
+        window.pywebview.api.apply_frame(payload);
+    }
+
     previewFrameIdx++;
     previewTimer = setTimeout(playNextFrame, frame.duration);
 }
@@ -419,7 +424,6 @@ function loadAnimationData(data) {
     renderTimeline();
     if (animFrames.length > 0) selectAnimFrame(0);
     updateAnimFrameCount();
-    updateAnimPyOutput();
     savedAnimations[data.name] = data;
     renderSavedList();
 }
@@ -441,47 +445,10 @@ function renderSavedList() {
 }
 
 // ── Python export for animation ───────────────────────────────────────────────
-function updateAnimPyOutput() {
-    if (animFrames.length === 0) {
-        document.getElementById('animPyOutput').value = '# No frames yet';
-        return;
-    }
-    const lines = [
-        'import json, time',
-        'from aula_f108_pro_final import AulaF108Pro',
-        '',
-        '# Load animation from JSON file',
-        "with open('my_animation.json') as f:",
-        '    anim = json.load(f)',
-        '',
-        'kb = AulaF108Pro()',
-        'kb.connect()',
-        'kb.start()',
-        '',
-        'try:',
-        '    while True:  # loop',
-        '        for frame in anim["frames"]:',
-        '            kb.clear()',
-        '            for idx_str, c in frame["colors"].items():',
-        '                kb.set_index(int(idx_str, 16), c["r"], c["g"], c["b"])',
-        '            time.sleep(frame["duration"] / 1000)',
-        'except KeyboardInterrupt:',
-        '    pass',
-        '',
-        'kb.disconnect()',
-    ];
-    document.getElementById('animPyOutput').value = lines.join('\n');
-}
-
-function copyAnimPython() {
-    navigator.clipboard.writeText(document.getElementById('animPyOutput').value)
-        .then(() => toast('Copied!'));
-}
 
 // ── Panel open/close ──────────────────────────────────────────────────────────
 function openAnimPanel() {
     document.getElementById('animPanel').classList.add('open');
-    updateAnimPyOutput();
 }
 function closeAnimPanel() {
     stopPreview();

@@ -15,7 +15,8 @@
         <div class="logo">AULA <span>F108 Pro</span> — RGB Driver</div>
         <div class="status-bar">
             <div class="status-dot"></div>
-            <span id="conn-status">DEMO MODE — no hardware connected</span>
+            <span id="conn-status">Not connected</span>
+            <button class="tb-btn" onclick="connectKeyboard()" style="font-size:0.65rem;padding:4px 12px">⚡ CONNECT</button>
             <span class="footer-tag">VID:0C45 PID:800A</span>
         </div>
     </header>
@@ -65,7 +66,7 @@
                 </div>
             </div>
 
-            <div class="slider-group">
+            <!-- <div class="slider-group">
                 <div class="slider-row">
                     <label>SPEED <span id="speedVal">50</span></label>
                     <input type="range" id="speedSlider" min="0" max="100" value="50"
@@ -76,7 +77,7 @@
                     <input type="range" id="brightSlider" min="0" max="100" value="100"
                         oninput="document.getElementById('brightVal').textContent=this.value">
                 </div>
-            </div>
+            </div> -->
         </div>
 
         <!-- CENTER: Keyboard -->
@@ -85,7 +86,7 @@
                 <button class="tb-btn" onclick="selectAll()">SELECT ALL</button>
                 <button class="tb-btn" onclick="clearSelection()">DESELECT</button>
                 <button class="tb-btn danger" onclick="clearAll()">CLEAR ALL</button>
-                <button class="tb-btn primary" onclick="exportConfig()">⬇ EXPORT PY</button>
+
                 <span class="selection-info" id="selInfo">0 keys selected</span>
             </div>
 
@@ -93,7 +94,7 @@
 
             <div style="font-size:0.62rem;color:var(--dim);line-height:1.8">
                 <b style="color:var(--muted)">CLICK</b> key to select &nbsp;·&nbsp;
-                <b style="color:var(--muted)">SHIFT+CLICK</b> multi-select &nbsp;·&nbsp;
+                <!--<b style="color:var(--muted)">SHIFT+CLICK</b> multi-select &nbsp;·&nbsp;-->
                 <b style="color:var(--muted)">DRAG</b> to paint &nbsp;·&nbsp;
                 <b style="color:var(--muted)">APPLY COLOR</b> in right panel
             </div>
@@ -106,17 +107,13 @@
                 <div class="sel-empty">Click keys on the<br>keyboard to select</div>
             </div>
 
-            <div class="panel-title" style="margin-top:4px">Layers</div>
-            <div class="layer-list" id="layerList"></div>
-            <button class="tb-btn" style="width:100%;margin-top:4px" onclick="addLayer()">+ ADD LAYER</button>
-
-            <div class="panel-title" style="margin-top:4px">Python Output</div>
-            <textarea id="pyOutput" readonly style="
-                background:var(--bg);border:1px solid var(--border);border-radius:6px;
-                color:#6cffaa;font-family:inherit;font-size:0.62rem;padding:10px;
-                resize:none;height:180px;width:100%;line-height:1.6;outline:none;
-            "></textarea>
-            <button class="apply-btn" onclick="copyPython()">COPY CODE</button>
+            <div class="panel-title" style="margin-top:4px">Keyboard</div>
+            <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:8px">⚡ APPLY TO KEYBOARD</button>
+            <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
+            <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
+                <b style="color:var(--muted)">APPLY</b> streams colors live<br>
+                <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle (~2s)
+            </div>
         </div>
     </main>
 
@@ -221,13 +218,12 @@
                     </div>
 
                     <div>
-                        <div class="panel-title" style="margin-bottom:8px">Export Python</div>
-                        <textarea id="animPyOutput" readonly style="
-                            background:var(--bg);border:1px solid var(--border);border-radius:6px;
-                            color:#6cffaa;font-family:inherit;font-size:0.58rem;padding:8px;
-                            resize:none;height:120px;width:100%;line-height:1.6;outline:none;
-                        "></textarea>
-                        <button class="tb-btn" style="width:100%;margin-top:6px" onclick="copyAnimPython()">COPY CODE</button>
+                        <div class="panel-title" style="margin-bottom:8px">Keyboard</div>
+                        <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:6px;font-size:0.68rem">⚡ APPLY TO KEYBOARD</button>
+                        <button class="apply-btn" onclick="saveToFlash()" style="font-size:0.68rem;background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
+                        <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.7">
+                            Playback pushes each frame<br>live to the keyboard automatically
+                        </div>
                     </div>
                 </div>
             </div>

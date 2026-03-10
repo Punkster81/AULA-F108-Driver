@@ -4,8 +4,7 @@ const selected = new Set();
 let painting = false;
 let paintColor = null;
 let activeEffect = 'static';
-let layers = [{ name: 'Layer 1', colors: {}, visible: true }];
-let activeLayer = 0;
+
 
 // ── Swatches ─────────────────────────────────────────────────────────────────
 const SWATCHES = [
@@ -201,9 +200,9 @@ function applyColorToSelected() {
         keyColors[idx] = { r, g, b };
         paintKey(idx, r, g, b);
     });
-    updatePyOutput();
     updateFooter();
     toast(`Applied to ${selected.size} key${selected.size !== 1 ? 's' : ''}`);
+    clearSelection();
 }
 
 function paintKey(idx, r, g, b) {
@@ -222,7 +221,6 @@ function paintKey(idx, r, g, b) {
 
 function clearAll() {
     Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
-    updatePyOutput();
     updateFooter();
     toast('Cleared all keys');
 }
@@ -237,7 +235,6 @@ function applyRainbow() {
         keyColors[idx] = rgb;
         paintKey(idx, rgb.r, rgb.g, rgb.b);
     });
-    updatePyOutput();
     updateFooter();
     toast('Rainbow applied!');
 }
@@ -256,78 +253,68 @@ function setEffect(btn) {
     document.querySelectorAll('.effect-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeEffect = btn.dataset.effect;
-    updatePyOutput();
 }
 
-// ── Layers ────────────────────────────────────────────────────────────────────
-function addLayer() {
-    layers.push({ name: `Layer ${layers.length + 1}`, colors: {}, visible: true });
-    renderLayers();
-    toast('Layer added');
+// ── PyWebView API bridge ───────────────────────────────────────────────────────
+function hasPyAPI() {
+    return window.pywebview && window.pywebview.api;
 }
-function renderLayers() {
-    const ll = document.getElementById('layerList');
-    ll.innerHTML = '';
-    layers.forEach((layer, i) => {
-        const el = document.createElement('div');
-        el.className = 'layer-item' + (i === activeLayer ? ' active-layer' : '');
-        const sampleColor = Object.values(layer.colors)[0];
-        const sc = sampleColor ? `rgb(${sampleColor.r},${sampleColor.g},${sampleColor.b})` : '#333';
-        el.innerHTML = `
-      <div class="layer-color" style="background:${sc}"></div>
-      <span class="layer-name">${layer.name}</span>
-      <button class="layer-del" onclick="deleteLayer(${i},event)">✕</button>
-    `;
-        el.onclick = () => { activeLayer = i; renderLayers(); };
-        ll.appendChild(el);
-    });
-}
-function deleteLayer(i, e) {
-    e.stopPropagation();
-    if (layers.length === 1) { toast('Cannot delete last layer'); return; }
-    layers.splice(i, 1);
-    if (activeLayer >= layers.length) activeLayer = layers.length - 1;
-    renderLayers();
-}
-renderLayers();
 
-// ── Python output ─────────────────────────────────────────────────────────────
-function updatePyOutput() {
-    const lines = ['from aula_f108_pro_final import AulaF108Pro', '',
-        'kb = AulaF108Pro()', 'kb.connect()', ''];
-    const lit = Object.entries(keyColors).filter(([, c]) => c.r || c.g || c.b);
-    if (lit.length === 0) {
-        lines.push('kb.clear()');
+// ── Connection ────────────────────────────────────────────────────────────────
+async function connectKeyboard() {
+    if (!hasPyAPI()) { toast('Run via python main.py to connect'); return; }
+    toast('Connecting...');
+    const r = await window.pywebview.api.connect();
+    const dot = document.querySelector('.status-dot');
+    const status = document.getElementById('conn-status');
+    if (r.ok) {
+        status.textContent = r.message;
+        dot.style.background = '#2ecc71';
+        dot.style.boxShadow = '0 0 8px #2ecc71';
+        toast('Connected!');
+        await pushColors();
     } else {
-        lit.forEach(([idx, { r, g, b }]) => {
-            lines.push(`kb.set_index(0x${idx}, ${r}, ${g}, ${b})`);
-        });
+        status.textContent = r.message;
+        dot.style.background = '#ff4444';
+        dot.style.boxShadow = '0 0 8px #ff4444';
+        toast(r.message);
     }
-    lines.push('', 'kb.start()');
-    if (activeEffect !== 'static') lines.push(`# Effect: ${activeEffect} (TBD - capture from AULA)`);
-    lines.push('', '# kb.save()  # uncomment to write to flash');
-    document.getElementById('pyOutput').value = lines.join('\n');
 }
-updatePyOutput();
+
+// ── Build color payload from current state ────────────────────────────────────
+function buildPayload() {
+    const payload = {};
+    Object.entries(keyColors).forEach(([idx, {r, g, b}]) => {
+        if (r || g || b) payload[idx] = [r, g, b];
+    });
+    return payload;
+}
+
+// ── Push current colors to keyboard ──────────────────────────────────────────
+async function pushColors() {
+    if (!hasPyAPI()) return;
+    return window.pywebview.api.apply_colors(buildPayload());
+}
+
+// ── Apply button ──────────────────────────────────────────────────────────────
+async function applyToKeyboard() {
+    if (!hasPyAPI()) { toast('Not running in app — use python main.py'); return; }
+    const r = await pushColors();
+    if (r && r.ok) toast('Applied to keyboard');
+    else if (r) toast(r.message);
+}
+
+// ── Save to flash ─────────────────────────────────────────────────────────────
+async function saveToFlash() {
+    if (!hasPyAPI()) { toast('Not running in app — use python main.py'); return; }
+    toast('Saving to flash (~2s)...');
+    const r = await window.pywebview.api.save_to_flash(buildPayload());
+    toast(r.ok ? '💾 ' + r.message : r.message);
+}
 
 function updateFooter() {
     const n = Object.values(keyColors).filter(c => c.r || c.g || c.b).length;
     document.getElementById('colorCount').textContent = `${n} key${n !== 1 ? 's' : ''} lit`;
-}
-
-// ── Export ────────────────────────────────────────────────────────────────────
-function exportConfig() {
-    const code = document.getElementById('pyOutput').value;
-    const blob = new Blob([code], { type: 'text/plain' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'aula_config.py';
-    a.click();
-    toast('Exported aula_config.py');
-}
-function copyPython() {
-    navigator.clipboard.writeText(document.getElementById('pyOutput').value)
-        .then(() => toast('Copied to clipboard'));
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -337,8 +324,11 @@ function toast(msg) {
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
 }
+
+// ── Auto-connect when PyWebView is ready ─────────────────────────────────────
+window.addEventListener('pywebviewready', () => connectKeyboard());
 
 // Init with rainbow on top row as preview
 ['01', '02', '03', '04', '05', '06', '07', '08', '09', '0a', '0b', '0c', '0d'].forEach((idx, i, arr) => {
@@ -346,5 +336,4 @@ function toast(msg) {
     keyColors[idx] = rgb;
     paintKey(idx, rgb.r, rgb.g, rgb.b);
 });
-updatePyOutput();
 updateFooter();
