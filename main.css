@@ -1,4 +1,4 @@
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;700;800&display=swap');
 
     :root {
         --bg: #0a0a0c;
@@ -419,6 +419,10 @@
 
     .key-275 {
         min-width: 110px;
+    }
+
+    .key-650 {
+        min-width: 247px;
     }
 
     .key-spacer {

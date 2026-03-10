@@ -8,7 +8,7 @@ let animPaintColor = { r: 255, g: 0, b: 0 };
 
 // ── Mini keyboard ─────────────────────────────────────────────────────────────
 const miniKeyEls = {};
-const MK_SIZES = { 'key-15': 'mk-15', 'key-175': 'mk-175', 'key-2': 'mk-2', 'key-225': 'mk-225', 'key-275': 'mk-275' };
+const MK_SIZES = { 'key-15': 'mk-15', 'key-175': 'mk-175', 'key-2': 'mk-2', 'key-225': 'mk-225', 'key-275': 'mk-275', 'key-650': 'mk-650' };
 (function buildMiniKb() {
     const mk = document.getElementById('miniKeyboard');
 
@@ -47,7 +47,7 @@ const MK_SIZES = { 'key-15': 'mk-15', 'key-175': 'mk-175', 'key-2': 'mk-2', 'key
 
     // Mini nav cluster
     const navB = document.createElement('div');
-    navB.style.cssText = 'display:grid;grid-template-columns:repeat(3,22px);grid-template-rows:repeat(5,22px);gap:3px';
+    navB.style.cssText = 'display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(6,28px);gap:3px';
     NAV.forEach(([label, idx, col, row]) => {
         const k = makeMiniKey(label, idx, '');
         k.style.gridColumn = col;
@@ -58,15 +58,15 @@ const MK_SIZES = { 'key-15': 'mk-15', 'key-175': 'mk-175', 'key-2': 'mk-2', 'key
 
     // Mini numpad grid
     const numB = document.createElement('div');
-    numB.style.cssText = 'display:grid;grid-template-columns:repeat(4,22px);grid-template-rows:repeat(5,22px);gap:3px;align-self:flex-end';
+    numB.style.cssText = 'display:grid;grid-template-columns:repeat(4,28px);grid-template-rows:repeat(6,28px);gap:3px;align-self:flex-end';
     let nc = 1, nr = 1;
     NUMPAD.forEach(([label, idx, cs, rs]) => {
         if (!idx) { nc += cs; if (nc > 4) { nc = 1; nr++; } return; }
         const k = makeMiniKey(label, idx, '');
         k.style.gridColumn = `${nc}/span ${cs}`;
         k.style.gridRow = `${nr}/span ${rs}`;
-        if (rs > 1) k.style.height = `${rs * 22 + (rs - 1) * 3}px`;
-        if (cs > 1) k.style.minWidth = `${cs * 22 + (cs - 1) * 3}px`;
+        if (rs > 1) k.style.height = `${rs * 28 + (rs - 1) * 3}px`;
+        if (cs > 1) k.style.minWidth = `${cs * 28 + (cs - 1) * 3}px`;
         numB.appendChild(k);
         nc += cs; if (nc > 4) { nc = 1; nr++; }
     });
@@ -206,20 +206,109 @@ function renderTimeline() {
     updateTotalDuration();
 }
 
+// Key layout for frame preview SVG — full F108 Pro layout in unit coordinates
+const U = 10;   // pixels per unit
+const KG = 1.2; // gap between keys
+const KR = 1;   // corner radius
+
+const PREVIEW_KEYS = (() => {
+    const keys = [];
+    const k = (idx, x, y, w=1, h=1) => keys.push({idx, x, y, w, h});
+
+    // Row 0 — Fn row: ESC | F1-F4 | F5-F8 | F9-F12
+    k('01', 0,    0);
+    k('02', 1.25, 0); k('03', 2.25, 0); k('04', 3.25, 0); k('05', 4.25, 0);
+    k('06', 5.5,  0); k('07', 6.5,  0); k('08', 7.5,  0); k('09', 8.5,  0);
+    k('0a', 9.75, 0); k('0b',10.75, 0); k('0c',11.75, 0); k('0d',12.75, 0);
+
+    // Row 1 — number row
+    k('13', 0,1); k('14',1,1); k('15',2,1); k('16',3,1); k('17',4,1);
+    k('18', 5,1); k('19',6,1); k('1a',7,1); k('1b',8,1); k('1c',9,1);
+    k('1d',10,1); k('1e',11,1); k('1f',12,1); k('67',13,1,2);
+
+    // Row 2 — QWERTY
+    k('25', 0,   2, 1.5);
+    k('26', 1.5, 2); k('27', 2.5, 2); k('28', 3.5, 2); k('29', 4.5, 2);
+    k('2a', 5.5, 2); k('2b', 6.5, 2); k('2c', 7.5, 2); k('2d', 8.5, 2);
+    k('2e', 9.5, 2); k('2f',10.5, 2); k('30',11.5, 2); k('31',12.5, 2);
+    k('43',13.5, 2, 1.5);
+
+    // Row 3 — ASDF
+    k('37', 0,   3, 1.75);
+    k('38', 1.75,3); k('39', 2.75,3); k('3a', 3.75,3); k('3b', 4.75,3);
+    k('3c', 5.75,3); k('3d', 6.75,3); k('3e', 7.75,3); k('3f', 8.75,3);
+    k('40', 9.75,3); k('41',10.75,3); k('42',11.75,3);
+    k('55',12.75, 3, 2.25);
+
+    // Row 4 — ZXCV
+    k('49', 0,    4, 2.25);
+    k('4a', 2.25, 4); k('4b', 3.25, 4); k('4c', 4.25, 4); k('4d', 5.25, 4);
+    k('4e', 6.25, 4); k('4f', 7.25, 4); k('50', 8.25, 4); k('51', 9.25, 4);
+    k('52',10.25, 4); k('53',11.25, 4);
+    k('54',12.25, 4, 2.75);
+
+    // Row 5 — bottom row
+    k('5b', 0,    5, 1.5);
+    k('5c', 1.5,  5);
+    k('5d', 2.5,  5, 1.5);
+    k('5e', 4,    5, 6.5);
+    k('5f',10.5,  5);
+    k('60',11.5,  5);
+    k('61',12.5,  5);
+    k('62',13.5,  5, 1.5);
+
+    // Nav cluster — gap at X=15.5
+    const NX = 15.5;
+    k('70',NX+0,0); k('71',NX+1,0); k('73',NX+2,0); // PRT SCR PAUSE
+    k('74',NX+0,1); k('75',NX+1,1); k('76',NX+2,1); // INS HOM PGU
+    k('77',NX+0,2); k('78',NX+1,2); k('79',NX+2,2); // DEL END PGD
+    // row 3 blank
+    k('65',NX+1,4);                                   // UP (row 4, was 3 — but SVG rows are 0-based so shift +1 vs NAV grid)
+    k('63',NX+0,5); k('64',NX+1,5); k('66',NX+2,5); // L DN R
+
+    // Numpad — gap at X=19
+    const NPX = 19;
+    k('20',NPX+0,1); k('21',NPX+1,1); k('22',NPX+2,1); k('7a',NPX+3,1);       // NUM / * -
+    k('32',NPX+0,2); k('33',NPX+1,2); k('34',NPX+2,2); k('7b',NPX+3,2,1,2);  // 7 8 9 +
+    k('44',NPX+0,3); k('45',NPX+1,3); k('46',NPX+2,3);                         // 4 5 6
+    k('56',NPX+0,4); k('57',NPX+1,4); k('58',NPX+2,4); k('6a',NPX+3,4,1,2);  // 1 2 3 ENTER
+    k('68',NPX+0,5,2);                k('69',NPX+2,5);                          // 0 .
+
+    return keys;
+})();
+
+const PREVIEW_TOTAL_W = 23; // total units wide
+const PREVIEW_TOTAL_H = 7;  // total units tall (6 rows + extra gap in nav cluster)
+
 function renderFramePreview(frameIdx) {
     const fp = document.getElementById(`fp-${frameIdx}`);
     if (!fp) return;
     fp.innerHTML = '';
-    // Show a representative sample of keys as tiny pixels
-    const sampleIdxs = LED_ORDER.slice(0, 32);
     const colors = animFrames[frameIdx].colors || {};
-    sampleIdxs.forEach(idx => {
+
+    const svgW = PREVIEW_TOTAL_W * U;
+    const svgH = PREVIEW_TOTAL_H * U;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.style.display = 'block';
+
+    PREVIEW_KEYS.forEach(({idx, x, y, w, h}) => {
         const c = colors[idx];
-        const px = document.createElement('div');
-        px.className = 'frame-pixel';
-        px.style.background = c ? `rgb(${c.r},${c.g},${c.b})` : 'var(--key-off)';
-        fp.appendChild(px);
+        const fill = c ? `rgb(${c.r},${c.g},${c.b})` : '#1a1a22';
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x',      x * U + KG / 2);
+        rect.setAttribute('y',      y * U + KG / 2);
+        rect.setAttribute('width',  w * U - KG);
+        rect.setAttribute('height', h * U - KG);
+        rect.setAttribute('rx', KR);
+        rect.setAttribute('fill', fill);
+        svg.appendChild(rect);
     });
+
+    fp.appendChild(svg);
 }
 
 function updateFrameThumb(frameIdx) {

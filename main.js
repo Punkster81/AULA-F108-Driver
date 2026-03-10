@@ -100,7 +100,7 @@ const navBlock = document.createElement('div');
 navBlock.style.cssText = `
   display:grid;
   grid-template-columns:repeat(3,38px);
-  grid-template-rows:repeat(5,38px);
+  grid-template-rows:repeat(6,38px);
   gap:4px;
 `;
 NAV.forEach(([label, idx, col, row]) => {
@@ -116,7 +116,7 @@ const numBlock = document.createElement('div');
 numBlock.style.cssText = `
   display:grid;
   grid-template-columns:repeat(4,38px);
-  grid-template-rows:repeat(5,38px);
+  grid-template-rows:repeat(6,38px);
   gap:4px;
   align-self:flex-end;
 `;

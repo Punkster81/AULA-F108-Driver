@@ -18,7 +18,7 @@
     background: #0f0f14;
     border: 1px solid var(--border);
     border-radius: 12px;
-    width: min(940px, 96vw);
+    width: min(1200px, 98vw);
     max-height: 90vh;
     display: flex;
     flex-direction: column;
@@ -105,12 +105,10 @@
 
 .frame-thumb {
     flex-shrink: 0;
-    width: 52px;
+    width: 160px;
     border-radius: 6px;
     border: 2px solid var(--border);
     cursor: pointer;
-    position: relative;
-    overflow: hidden;
     background: var(--key-off);
     transition: border-color 0.12s, transform 0.1s;
     display: flex;
@@ -129,15 +127,16 @@
 
 .frame-preview {
     flex: 1;
-    display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    gap: 1px;
-    padding: 4px;
+    padding: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50px;
 }
 
-.frame-pixel {
-    aspect-ratio: 1;
-    border-radius: 1px;
+.frame-preview svg {
+    width: 100%;
+    height: auto;
 }
 
 .frame-duration {
@@ -176,7 +175,7 @@
 /* ── Mini keyboard in animation editor ── */
 .anim-kb-area {
     flex: 1;
-    overflow-y: auto;
+    overflow: auto;
     padding: 16px 20px;
     display: flex;
     flex-direction: column;
@@ -195,8 +194,8 @@
 }
 
 .mini-key {
-    height: 22px;
-    min-width: 22px;
+    height: 28px;
+    min-width: 28px;
     border-radius: 3px;
     cursor: pointer;
     position: relative;
@@ -239,23 +238,27 @@
 
 /* Key size variants for mini */
 .mk-15 {
-    min-width: 33px;
+    min-width: 42px;
 }
 
 .mk-175 {
-    min-width: 39px;
+    min-width: 49px;
 }
 
 .mk-2 {
-    min-width: 46px;
+    min-width: 60px;
 }
 
 .mk-225 {
-    min-width: 52px;
+    min-width: 66px;
 }
 
 .mk-275 {
-    min-width: 63px;
+    min-width: 80px;
+}
+
+.mk-650 {
+    min-width: 170px;
 }
 
 .mk-spacer {

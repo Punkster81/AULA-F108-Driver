@@ -43,7 +43,7 @@ const ROWS = [
         ['CTRL', '5b', 'key-15'],
         ['WIN', '5c', ''],
         ['ALT', '5d', 'key-15'],
-        ['SPACE', '5e', 'key-275'],
+        ['SPACE', '5e', 'key-650'],
         ['ALT', '5f', ''],
         ['FN', '60', ''],
         ['MENU', '61', ''],
@@ -63,8 +63,9 @@ const NAV = [
     ['PRT', '70', 1, 1], ['SCR', '71', 2, 1], ['PAUSE', '73', 3, 1],
     ['INS', '74', 1, 2], ['HOM', '75', 2, 2], ['PGU', '76', 3, 2],
     ['DEL', '77', 1, 3], ['END', '78', 2, 3], ['PGD', '79', 3, 3],
-    ['↑', '65', 2, 4],
-    ['←', '63', 1, 5], ['↓', '64', 2, 5], ['→', '66', 3, 5],
+    // row 4 intentionally blank — gap between nav and arrows
+    ['↑', '65', 2, 5],
+    ['←', '63', 1, 6], ['↓', '64', 2, 6], ['→', '66', 3, 6],
 ];
 
 // Numpad — rendered as CSS grid to support rowspan on + and Enter
@@ -83,4 +84,3 @@ const LED_ORDER = [
     ...NAV.map(k => k[1]).filter(Boolean),
     ...NUMPAD.map(k => k[1]).filter(Boolean)
 ];
-
