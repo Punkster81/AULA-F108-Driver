@@ -120,6 +120,16 @@ def animations_dir():
     return d
 
 class AnimationAPI:
+    def save_current_animation(self, data):
+        """Save animation as current_animation.json next to the app."""
+        try:
+            path = os.path.join(animations_dir(), 'current_animation.json')
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
     def save_animation(self, name, data):
         """
         Save animation JSON to <app_dir>/animations/<name>.json

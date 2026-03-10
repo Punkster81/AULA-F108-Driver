@@ -6,111 +6,32 @@ let previewFrameIdx = 0;
 let isPlaying = false;
 let animPaintColor = { r: 255, g: 0, b: 0 };
 
-// ── Mini keyboard ─────────────────────────────────────────────────────────────
-const miniKeyEls = {};
-const MK_SIZES = { 'key-15': 'mk-15', 'key-175': 'mk-175', 'key-2': 'mk-2', 'key-225': 'mk-225', 'key-275': 'mk-275', 'key-650': 'mk-650' };
-(function buildMiniKb() {
-    const mk = document.getElementById('miniKeyboard');
+// ── Anim painting — operates directly on the main keyboard ───────────────────
 
-    function makeMiniKey(label, idx, cls) {
-        const sz = MK_SIZES[cls] || '';
-        const k = document.createElement('div');
-        k.className = 'mini-key ' + sz;
-        k.dataset.idx = idx;
-        k.innerHTML = `<span>${label}</span>`;
-        k.addEventListener('mousedown', e => { e.preventDefault(); miniPaintKey(idx); miniPainting = true; });
-        k.addEventListener('mouseenter', () => { if (miniPainting) miniPaintKey(idx); });
-        miniKeyEls[idx] = k;
-        return k;
-    }
-
-    // Wrapper: main + nav + numpad
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;gap:5px;align-items:flex-start';
-
-    const mainB = document.createElement('div');
-    mainB.style.cssText = 'display:flex;flex-direction:column;gap:3px';
-    ROWS.forEach(row => {
-        const rowEl = document.createElement('div');
-        rowEl.className = 'kb-row';
-        row.forEach(([label, idx, cls]) => {
-            if (!idx) {
-                const sp = document.createElement('div');
-                sp.className = 'mini-key mk-spacer ' + (MK_SIZES[cls] || 'mk-spacer');
-                rowEl.appendChild(sp); return;
-            }
-            rowEl.appendChild(makeMiniKey(label, idx, cls));
-        });
-        mainB.appendChild(rowEl);
-    });
-    wrap.appendChild(mainB);
-
-    // Mini nav cluster
-    const navB = document.createElement('div');
-    navB.style.cssText = 'display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(6,28px);gap:3px';
-    NAV.forEach(([label, idx, col, row]) => {
-        const k = makeMiniKey(label, idx, '');
-        k.style.gridColumn = col;
-        k.style.gridRow = row;
-        navB.appendChild(k);
-    });
-    wrap.appendChild(navB);
-
-    // Mini numpad grid
-    const numB = document.createElement('div');
-    numB.style.cssText = 'display:grid;grid-template-columns:repeat(4,28px);grid-template-rows:repeat(6,28px);gap:3px;align-self:flex-end';
-    let nc = 1, nr = 1;
-    NUMPAD.forEach(([label, idx, cs, rs]) => {
-        if (!idx) { nc += cs; if (nc > 4) { nc = 1; nr++; } return; }
-        const k = makeMiniKey(label, idx, '');
-        k.style.gridColumn = `${nc}/span ${cs}`;
-        k.style.gridRow = `${nr}/span ${rs}`;
-        if (rs > 1) k.style.height = `${rs * 28 + (rs - 1) * 3}px`;
-        if (cs > 1) k.style.minWidth = `${cs * 28 + (cs - 1) * 3}px`;
-        numB.appendChild(k);
-        nc += cs; if (nc > 4) { nc = 1; nr++; }
-    });
-    wrap.appendChild(numB);
-    mk.appendChild(wrap);
-
-    document.addEventListener('mouseup', () => { miniPainting = false; });
-})();
-let miniPainting = false;
-
-function miniPaintKey(idx) {
+// Called by main.js onKeyDown/onKeyPaint when animModeActive is true.
+function animPaintKey(idx) {
     if (activeAnimFrame < 0) { toast('Select a frame first'); return; }
-
     const { r, g, b } = animPaintColor;
-
-    if (!animFrames[activeAnimFrame].colors)
-        animFrames[activeAnimFrame].colors = {};
-
+    if (!animFrames[activeAnimFrame].colors) animFrames[activeAnimFrame].colors = {};
     animFrames[activeAnimFrame].colors[idx] = { r, g, b };
-
-    renderMiniKey(idx, r, g, b);
+    paintKey(idx, r, g, b);
     updateFrameThumb(activeAnimFrame);
-    updateTotalDuration();
 }
 
-function renderMiniKey(idx, r, g, b) {
-    const k = miniKeyEls[idx];
-    if (!k) return;
-    if (r === 0 && g === 0 && b === 0) {
-        k.style.setProperty('--key-color', 'transparent');
-        k.classList.remove('lit');
-    } else {
-        k.style.setProperty('--key-color', `rgb(${r},${g},${b})`);
-        k.classList.add('lit');
-    }
-}
-
-function loadFrameIntoMini(frameIdx) {
-    // Clear all mini keys
-    Object.keys(miniKeyEls).forEach(idx => renderMiniKey(idx, 0, 0, 0));
+// Load a frame's colors onto the main keyboard.
+function loadFrameIntoMain(frameIdx) {
+    Object.keys(keyEls).forEach(idx => paintKey(idx, 0, 0, 0));
     if (frameIdx < 0 || !animFrames[frameIdx]) return;
     const colors = animFrames[frameIdx].colors || {};
-    Object.entries(colors).forEach(([idx, { r, g, b }]) => renderMiniKey(idx, r, g, b));
+    Object.entries(colors).forEach(([idx, { r, g, b }]) => paintKey(idx, r, g, b));
 }
+
+// Restore static keyColors to main keyboard when exiting anim mode.
+function restoreMainKeyboard() {
+    Object.keys(keyEls).forEach(idx => paintKey(idx, 0, 0, 0));
+    Object.entries(keyColors).forEach(([idx, { r, g, b }]) => paintKey(idx, r, g, b));
+}
+
 
 // ── Frame management ──────────────────────────────────────────────────────────
 function addFrame(colors = null, duration = 100) {
@@ -124,7 +45,7 @@ function addFrame(colors = null, duration = 100) {
 function selectAnimFrame(idx) {
     activeAnimFrame = idx;
     document.getElementById('frameDuration').value = animFrames[idx]?.duration ?? 100;
-    loadFrameIntoMini(idx);
+    loadFrameIntoMain(idx);
     document.querySelectorAll('.frame-thumb').forEach((el, i) => {
         el.classList.toggle('active-frame', i === idx);
     });
@@ -153,7 +74,7 @@ function duplicateFrame() {
 function clearFrame() {
     if (activeAnimFrame < 0) { toast('No frame selected'); return; }
     animFrames[activeAnimFrame].colors = {};
-    loadFrameIntoMini(activeAnimFrame);
+    loadFrameIntoMain(activeAnimFrame);
     updateFrameThumb(activeAnimFrame);
     toast('Frame cleared');
 }
@@ -171,7 +92,7 @@ function deleteFrame() {
 function copyFromMain() {
     if (activeAnimFrame < 0) { toast('Select a frame first'); return; }
     animFrames[activeAnimFrame].colors = JSON.parse(JSON.stringify(keyColors));
-    loadFrameIntoMini(activeAnimFrame);
+    loadFrameIntoMain(activeAnimFrame);
     updateFrameThumb(activeAnimFrame);
     toast('Copied from main view');
 }
@@ -340,8 +261,7 @@ function stopPreview() {
     document.getElementById('playBtn').textContent = '▶ PREVIEW';
     document.getElementById('playBtn').classList.remove('playing');
     document.getElementById('playStatus').textContent = 'Stopped';
-    // Restore active frame
-    if (activeAnimFrame >= 0) loadFrameIntoMini(activeAnimFrame);
+    if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
 }
 
 function playNextFrame() {
@@ -352,22 +272,76 @@ function playNextFrame() {
     }
     const frame = animFrames[previewFrameIdx];
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
-    loadFrameIntoMini(previewFrameIdx);
-
-    // Push frame to keyboard if connected
-    if (window.pywebview && window.pywebview.api) {
-        const payload = {};
-        Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => {
-            if (r || g || b) payload[idx] = [r, g, b];
-        });
-        window.pywebview.api.apply_frame(payload);
-    }
-
+    loadFrameIntoMain(previewFrameIdx);
     previewFrameIdx++;
     previewTimer = setTimeout(playNextFrame, frame.duration);
 }
 
-// ── Save / Load JSON ──────────────────────────────────────────────────────────
+// ── Active animation (runs on keyboard, independent of screen preview) ────────
+let activeAnimTimer = null;
+let activeAnimFrameIdx = 0;
+let isActiveAnim = false;
+
+async function setAsActiveAnimation() {
+    if (animFrames.length === 0) { toast('No frames to activate'); return; }
+
+    // Save as current_animation.json
+    const name = document.getElementById('animNameInput').value.trim() || 'animation';
+    const data = {
+        name,
+        version: 1,
+        created: new Date().toISOString(),
+        loop: true,
+        frames: animFrames.map(f => ({
+            duration: f.duration,
+            colors: Object.fromEntries(
+                Object.entries(f.colors).map(([idx, { r, g, b }]) => [idx, { r, g, b }])
+            )
+        }))
+    };
+
+    if (window.pywebview && window.pywebview.api) {
+        await window.pywebview.api.save_current_animation(data);
+    }
+
+    startActiveAnim();
+}
+
+function startActiveAnim() {
+    stopActiveAnim();
+    isActiveAnim = true;
+    activeAnimFrameIdx = 0;
+    document.getElementById('activeAnimBtn').textContent = '■ STOP ACTIVE';
+    document.getElementById('activeAnimBtn').classList.add('playing');
+    document.getElementById('activeAnimStatus').textContent = 'Running on keyboard';
+    runActiveAnimFrame();
+}
+
+function stopActiveAnim() {
+    isActiveAnim = false;
+    clearTimeout(activeAnimTimer);
+    const btn = document.getElementById('activeAnimBtn');
+    if (btn) { btn.textContent = '▶ SET AS ACTIVE'; btn.classList.remove('playing'); }
+    const status = document.getElementById('activeAnimStatus');
+    if (status) status.textContent = '';
+}
+
+function runActiveAnimFrame() {
+    if (!isActiveAnim || animFrames.length === 0) return;
+    if (activeAnimFrameIdx >= animFrames.length) activeAnimFrameIdx = 0;
+    const frame = animFrames[activeAnimFrameIdx];
+    if (window.pywebview && window.pywebview.api) {
+        const payload = {};
+        Object.entries(frame.colors || {}).forEach(([idx, { r, g, b }]) => {
+            if (r || g || b) payload[idx] = [r, g, b];
+        });
+        window.pywebview.api.apply_frame(payload);
+    }
+    activeAnimFrameIdx++;
+    activeAnimTimer = setTimeout(runActiveAnimFrame, frame.duration);
+}
+
+
 async function saveAnimation() {
     const name = document.getElementById('animNameInput').value.trim() || 'animation';
     if (animFrames.length === 0) { toast('No frames to save'); return; }
@@ -478,26 +452,58 @@ function renderSavedList() {
 
 // ── Python export for animation ───────────────────────────────────────────────
 
-// ── Panel open/close ──────────────────────────────────────────────────────────
+// ── Anim mode toggle (inline, no overlay) ────────────────────────────────────
+let animModeActive = false;
+
 function openAnimPanel() {
-    document.getElementById('animPanel').classList.add('open');
+    animModeActive = true;
+    clearSelection();
+    document.getElementById('staticLeft').style.display = 'none';
+    document.getElementById('animLeft').style.display = 'block';
+    document.getElementById('timelineWrap').style.display = 'block';
+    document.getElementById('staticHint').style.display = 'none';
+    document.getElementById('animHint').style.display = 'block';
+    document.getElementById('staticRight').style.display = 'none';
+    document.getElementById('animRight').style.display = 'flex';
+    const btn = document.getElementById('animToggleBtn');
+    if (btn) { btn.textContent = '✕ EXIT ANIMATIONS'; btn.style.cssText = 'border-color:#ff4444;color:#ff4444'; }
+    // Show active frame on keyboard, or clear it
+    if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
+    else Object.keys(keyEls).forEach(idx => paintKey(idx, 0, 0, 0));
     loadAnimationsFromDisk();
 }
+
 function closeAnimPanel() {
+    animModeActive = false;
+    clearSelection();
     stopPreview();
-    document.getElementById('animPanel').classList.remove('open');
+    stopActiveAnim();
+    document.getElementById('staticLeft').style.display = 'block';
+    document.getElementById('animLeft').style.display = 'none';
+    document.getElementById('timelineWrap').style.display = 'none';
+    document.getElementById('staticHint').style.display = 'block';
+    document.getElementById('animHint').style.display = 'none';
+    document.getElementById('staticRight').style.display = 'block';
+    document.getElementById('animRight').style.display = 'none';
+    const btn = document.getElementById('animToggleBtn');
+    if (btn) { btn.textContent = '🎬 ANIMATIONS'; btn.style.cssText = 'border-color:var(--accent2);color:var(--accent2)'; }
+    restoreMainKeyboard();
 }
 
-// Add animation button to toolbar after DOM ready
-document.addEventListener('DOMContentLoaded', () => { }, false);
+function toggleAnimPanel() {
+    animModeActive ? closeAnimPanel() : openAnimPanel();
+}
+
+// Inject the toggle button into the toolbar once DOM is ready
 (function injectAnimBtn() {
     const toolbar = document.querySelector('.kb-toolbar');
     if (!toolbar) { setTimeout(injectAnimBtn, 50); return; }
     const btn = document.createElement('button');
+    btn.id = 'animToggleBtn';
     btn.className = 'tb-btn';
     btn.style.cssText = 'border-color:var(--accent2);color:var(--accent2)';
     btn.textContent = '🎬 ANIMATIONS';
-    btn.onclick = openAnimPanel;
+    btn.onclick = toggleAnimPanel;
     toolbar.insertBefore(btn, toolbar.querySelector('.selection-info'));
 })();
 

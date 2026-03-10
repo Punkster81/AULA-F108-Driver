@@ -607,6 +607,7 @@
         transition: all 0.25s;
         pointer-events: none;
         letter-spacing: 0.06em;
+        z-index: 9999;
     }
 
     #toast.show {

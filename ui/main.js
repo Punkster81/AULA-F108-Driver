@@ -139,8 +139,12 @@ function onKeyDown(e, k) {
     e.preventDefault();
     painting = true;
     const idx = k.dataset.idx;
+    // In anim mode: paint the active frame directly, no selection
+    if (typeof animModeActive !== 'undefined' && animModeActive) {
+        animPaintKey(idx);
+        return;
+    }
     if (!e.shiftKey) {
-        // Single click - toggle select
         if (selected.has(idx)) { selected.delete(idx); k.classList.remove('selected'); }
         else { selected.add(idx); k.classList.add('selected'); }
     } else {
@@ -151,6 +155,10 @@ function onKeyDown(e, k) {
 }
 function onKeyPaint(k) {
     const idx = k.dataset.idx;
+    if (typeof animModeActive !== 'undefined' && animModeActive) {
+        animPaintKey(idx);
+        return;
+    }
     selected.add(idx);
     k.classList.add('selected');
     updateSelPanel();
@@ -208,11 +216,12 @@ function applyColorToSelected() {
 function paintKey(idx, r, g, b) {
     const k = keyEls[idx];
     if (!k) return;
-    const brightness = Math.sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b) / 255;
     if (r === 0 && g === 0 && b === 0) {
         k.style.setProperty('--key-color', 'transparent');
         k.classList.remove('lit');
+        k.style.color = '';
     } else {
+        const brightness = Math.sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b) / 255;
         k.style.setProperty('--key-color', `rgb(${r},${g},${b})`);
         k.classList.add('lit');
         k.style.color = brightness > 0.5 ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
@@ -220,6 +229,10 @@ function paintKey(idx, r, g, b) {
 }
 
 function clearAll() {
+    if (typeof animModeActive !== 'undefined' && animModeActive) {
+        clearFrame();
+        return;
+    }
     Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
     updateFooter();
     toast('Cleared all keys');

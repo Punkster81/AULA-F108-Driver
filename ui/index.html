@@ -22,97 +22,172 @@
     </header>
 
     <main>
-        <!-- LEFT: Color tools -->
-        <div class="panel">
-            <div class="panel-title">Color</div>
+        <!-- LEFT panel -->
+        <div class="panel" id="leftPanel">
 
-            <div class="color-picker-wrap">
-                <div class="color-preview" id="colorPreview" onclick="document.getElementById('colorInput').click()">
-                    <input type="color" id="colorInput" value="#ff0000">
+            <!-- STATIC MODE -->
+            <div id="staticLeft">
+                <div class="panel-title">Color</div>
+                <div class="color-picker-wrap">
+                    <div class="color-preview" id="colorPreview" onclick="document.getElementById('colorInput').click()">
+                        <input type="color" id="colorInput" value="#ff0000">
+                    </div>
+                    <div class="rgb-row">
+                        <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255" value="255"></div>
+                        <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255" value="0"></div>
+                        <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255" value="0"></div>
+                    </div>
                 </div>
-                <div class="rgb-row">
-                    <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255" value="255"></div>
-                    <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255" value="0"></div>
-                    <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255" value="0"></div>
+                <div>
+                    <div class="panel-title" style="margin-bottom:10px">Swatches</div>
+                    <div class="swatch-grid" id="swatchGrid"></div>
+                </div>
+                <div>
+                    <div class="panel-title" style="margin-bottom:10px">Effects</div>
+                    <div class="effect-list">
+                        <button class="effect-btn active" data-effect="static" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#fff"></div>Static
+                        </button>
+                        <button class="effect-btn" data-effect="breathing" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#7c6cff"></div>Breathing
+                        </button>
+                        <button class="effect-btn" data-effect="wave" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#ff6c9d"></div>Rainbow Wave
+                        </button>
+                        <button class="effect-btn" data-effect="ripple" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#6cffdd"></div>Ripple
+                        </button>
+                        <button class="effect-btn" data-effect="flicker" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#ffd06c"></div>Flicker
+                        </button>
+                        <button class="effect-btn" data-effect="strobe" onclick="setEffect(this)">
+                            <div class="effect-dot" style="background:#ff4444"></div>Strobe
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div>
-                <div class="panel-title" style="margin-bottom:10px">Swatches</div>
-                <div class="swatch-grid" id="swatchGrid"></div>
+            <!-- ANIM MODE left: color + frame tools -->
+            <div id="animLeft" style="display:none">
+                <div class="panel-title">Frame Color</div>
+                <div class="color-picker-wrap">
+                    <div class="color-preview" id="animColorPreviewBlock" onclick="document.getElementById('animColorPicker').click()">
+                        <input type="color" id="animColorPicker" value="#ff0000">
+                    </div>
+                </div>
+
+                <div class="frame-actions" style="margin-top:14px">
+                    <div class="panel-title" style="margin-bottom:8px">Frame Tools</div>
+                    <button class="tb-btn" onclick="duplicateFrame()">DUPLICATE FRAME</button>
+                    <button class="tb-btn" onclick="clearFrame()">CLEAR FRAME</button>
+                    <button class="tb-btn" onclick="copyFromMain()">COPY FROM MAIN VIEW</button>
+                    <button class="tb-btn danger" onclick="deleteFrame()">DELETE FRAME</button>
+                </div>
+
+                <div style="margin-top:14px">
+                    <div class="panel-title" style="margin-bottom:10px">Frame Settings</div>
+                    <div class="duration-row">
+                        <label>DURATION</label>
+                        <input type="number" id="frameDuration" min="16" max="9999" value="100"
+                            oninput="updateFrameDuration()">
+                        <span>ms</span>
+                    </div>
+                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px">16ms ≈ 60fps · 33ms ≈ 30fps</div>
+                </div>
             </div>
 
-            <div>
-                <div class="panel-title" style="margin-bottom:10px">Effects</div>
-                <div class="effect-list">
-                    <button class="effect-btn active" data-effect="static" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#fff"></div>Static
-                    </button>
-                    <button class="effect-btn" data-effect="breathing" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#7c6cff"></div>Breathing
-                    </button>
-                    <button class="effect-btn" data-effect="wave" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#ff6c9d"></div>Rainbow Wave
-                    </button>
-                    <button class="effect-btn" data-effect="ripple" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#6cffdd"></div>Ripple
-                    </button>
-                    <button class="effect-btn" data-effect="flicker" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#ffd06c"></div>Flicker
-                    </button>
-                    <button class="effect-btn" data-effect="strobe" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#ff4444"></div>Strobe
-                    </button>
-                </div>
-            </div>
-
-            <!-- <div class="slider-group">
-                <div class="slider-row">
-                    <label>SPEED <span id="speedVal">50</span></label>
-                    <input type="range" id="speedSlider" min="0" max="100" value="50"
-                        oninput="document.getElementById('speedVal').textContent=this.value">
-                </div>
-                <div class="slider-row">
-                    <label>BRIGHTNESS <span id="brightVal">100</span></label>
-                    <input type="range" id="brightSlider" min="0" max="100" value="100"
-                        oninput="document.getElementById('brightVal').textContent=this.value">
-                </div>
-            </div> -->
         </div>
 
         <!-- CENTER: Keyboard -->
-        <div class="kb-area">
-            <div class="kb-toolbar">
+        <div class="kb-area" id="kbArea">
+            <div class="kb-toolbar" id="kbToolbar">
                 <button class="tb-btn" onclick="selectAll()">SELECT ALL</button>
                 <button class="tb-btn" onclick="clearSelection()">DESELECT</button>
                 <button class="tb-btn danger" onclick="clearAll()">CLEAR ALL</button>
-
                 <span class="selection-info" id="selInfo">0 keys selected</span>
             </div>
 
             <div class="keyboard" id="keyboard"></div>
 
-            <div style="font-size:0.62rem;color:var(--dim);line-height:1.8">
+            <!-- Timeline (hidden until anim mode) -->
+            <div id="timelineWrap" class="timeline-wrap" style="display:none">
+                <div class="timeline-label">
+                    <span>FRAMES &nbsp;<span id="animFrameCount" style="color:var(--text);font-size:0.7rem">0</span></span>
+                    <span id="totalDurationLabel" style="color:var(--text)">0ms total</span>
+                </div>
+                <div class="timeline" id="animTimeline">
+                    <button class="add-frame-btn" onclick="addFrame()" title="Add frame">+</button>
+                </div>
+            </div>
+
+            <div id="staticHint" style="font-size:0.62rem;color:var(--dim);line-height:1.8">
                 <b style="color:var(--muted)">CLICK</b> key to select &nbsp;·&nbsp;
-                <!--<b style="color:var(--muted)">SHIFT+CLICK</b> multi-select &nbsp;·&nbsp;-->
                 <b style="color:var(--muted)">DRAG</b> to paint &nbsp;·&nbsp;
                 <b style="color:var(--muted)">APPLY COLOR</b> in right panel
             </div>
+            <div id="animHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
+                <b style="color:var(--accent2)">SELECT A FRAME</b> above · then <b style="color:var(--muted)">PAINT</b> keys · uses Frame Color from left panel
+            </div>
         </div>
 
-        <!-- RIGHT: Selection & output -->
-        <div class="panel">
-            <div class="panel-title">Selection</div>
-            <div id="selPanel">
-                <div class="sel-empty">Click keys on the<br>keyboard to select</div>
+        <!-- RIGHT panel -->
+        <div class="panel" id="rightPanel">
+
+            <!-- STATIC MODE right -->
+            <div id="staticRight">
+                <div class="panel-title">Selection</div>
+                <div id="selPanel">
+                    <div class="sel-empty">Click keys on the<br>keyboard to select</div>
+                </div>
+                <div class="panel-title" style="margin-top:4px">Keyboard</div>
+                <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:8px">⚡ APPLY TO KEYBOARD</button>
+                <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
+                <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
+                    <b style="color:var(--muted)">APPLY</b> streams colors live<br>
+                    <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle (~2s)
+                </div>
             </div>
 
-            <div class="panel-title" style="margin-top:4px">Keyboard</div>
-            <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:8px">⚡ APPLY TO KEYBOARD</button>
-            <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
-            <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
-                <b style="color:var(--muted)">APPLY</b> streams colors live<br>
-                <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle (~2s)
+            <!-- ANIM MODE right: playback + save/load -->
+            <div id="animRight" style="display:none;flex-direction:column;gap:16px">
+
+                <div>
+                    <div class="panel-title" style="margin-bottom:10px">Playback</div>
+                    <div class="loop-row">
+                        <input type="checkbox" id="loopAnim" checked>
+                        <label for="loopAnim">Loop animation</label>
+                    </div>
+                    <div style="height:8px"></div>
+                    <div class="playback-controls">
+                        <button class="play-btn" id="playBtn" onclick="togglePreview()">▶ PREVIEW</button>
+                    </div>
+                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px" id="playStatus">Stopped</div>
+                </div>
+
+                <div>
+                    <div class="panel-title" style="margin-bottom:10px">Save Animation</div>
+                    <input type="text" class="anim-name-input" id="animNameInput" placeholder="Animation name..."
+                        value="My Animation">
+                    <div style="height:8px"></div>
+                    <button class="apply-btn" onclick="saveAnimation()" style="font-size:0.68rem">💾 SAVE TO FILE</button>
+                </div>
+
+                <div>
+                    <div class="panel-title" style="margin-bottom:6px">Saved Animations</div>
+                    <div id="savedAnimList" style="display:flex;flex-direction:column;gap:5px">
+                        <div style="font-size:0.6rem;color:var(--dim)">No saved animations</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel-title" style="margin-bottom:8px">Active Animation</div>
+                    <button class="play-btn" id="activeAnimBtn" onclick="setAsActiveAnimation()" style="width:100%;margin-bottom:6px">▶ SET AS ACTIVE</button>
+                    <div style="font-size:0.58rem;color:var(--dim);line-height:1.7" id="activeAnimStatus"></div>
+                    <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.7">
+                        Loops on keyboard continuously.<br>Saved as <b style="color:var(--muted)">current_animation.json</b><br>for auto-boot in a future update.
+                    </div>
+                </div>
+
             </div>
         </div>
     </main>
@@ -126,110 +201,8 @@
     </footer>
 
     <div id="toast"></div>
+    <input type="file" id="loadFileInput" accept=".json" style="display:none" onchange="loadAnimationFile(event)">
 
-    <!-- Animation panel -->
-    <div id="animPanel">
-        <div class="anim-modal">
-            <div class="anim-header">
-                <h2>Animation <span>Editor</span></h2>
-                <div style="font-size:0.62rem;color:var(--dim)" id="animFrameCount">0 frames</div>
-                <button class="tb-btn" onclick="closeAnimPanel()" style="margin-left:8px">✕ CLOSE</button>
-            </div>
-            <div class="anim-body">
-                <div class="anim-main">
-                    <!-- Timeline -->
-                    <div class="timeline-wrap">
-                        <div class="timeline-label">
-                            <span>FRAMES</span>
-                            <span id="totalDurationLabel" style="color:var(--text)">0ms total</span>
-                        </div>
-                        <div class="timeline" id="animTimeline">
-                            <button class="add-frame-btn" onclick="addFrame()" title="Add frame">+</button>
-                        </div>
-                    </div>
-                    <!-- Mini keyboard -->
-                    <div class="anim-kb-area">
-                        <div style="font-size:0.62rem;color:var(--dim)">
-                            Click a frame above, then paint keys below. Uses current color picker color.
-                        </div>
-                        <div class="mini-keyboard" id="miniKeyboard"></div>
-                    </div>
-                </div>
-
-                <!-- Side panel -->
-                <div class="anim-side">
-                    <div>
-                        <div class="panel-title" style="margin-bottom:10px">Frame Settings</div>
-                        <div class="duration-row">
-                            <label>DURATION</label>
-                            <input type="number" id="frameDuration" min="16" max="9999" value="100"
-                                oninput="updateFrameDuration()">
-                            <span>ms</span>
-                        </div>
-                        <div style="font-size:0.6rem;color:var(--dim);margin-top:6px">16ms = ~60fps &nbsp;·&nbsp; 33ms = ~30fps</div>
-                    </div>
-
-                    <div style="margin-top:12px">
-                        <label style="font-size:0.62rem;color:var(--dim)">FRAME COLOR</label>
-                        <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-                            <input type="color" id="animColorPicker" value="#ff0000"
-                                style="width:36px;height:28px;border:none;background:none;cursor:pointer">
-                            <span id="animColorPreview"
-                                style="width:20px;height:20px;border-radius:4px;border:1px solid var(--border);background:#ff0000"></span>
-                        </div>
-                    </div>
-
-                    <div class="frame-actions">
-                        <div class="panel-title" style="margin-bottom:8px">Frame Tools</div>
-                        <button class="tb-btn" onclick="duplicateFrame()">DUPLICATE FRAME</button>
-                        <button class="tb-btn" onclick="clearFrame()">CLEAR FRAME</button>
-                        <button class="tb-btn" onclick="copyFromMain()">COPY FROM MAIN VIEW</button>
-                        <button class="tb-btn danger" onclick="deleteFrame()">DELETE FRAME</button>
-                    </div>
-
-                    <div>
-                        <div class="panel-title" style="margin-bottom:10px">Playback</div>
-                        <div class="loop-row">
-                            <input type="checkbox" id="loopAnim" checked>
-                            <label for="loopAnim">Loop animation</label>
-                        </div>
-                        <div style="height:8px"></div>
-                        <div class="playback-controls">
-                            <button class="play-btn" id="playBtn" onclick="togglePreview()">▶ PREVIEW</button>
-                        </div>
-                        <div style="font-size:0.6rem;color:var(--dim);margin-top:6px" id="playStatus">Stopped</div>
-                    </div>
-
-                    <div>
-                        <div class="panel-title" style="margin-bottom:10px">Save Animation</div>
-                        <input type="text" class="anim-name-input" id="animNameInput" placeholder="Animation name..."
-                            value="My Animation">
-                        <div style="height:8px"></div>
-                        <button class="apply-btn" onclick="saveAnimation()" style="font-size:0.68rem">SAVE TO FILE (JSON)</button>
-                    </div>
-
-                    <div>
-                        <div class="panel-title" style="margin-bottom:10px">Load Animation</div>
-                        <button class="tb-btn" style="width:100%;margin-bottom:8px"
-                            onclick="document.getElementById('loadFileInput').click()">📂 LOAD JSON FILE</button>
-                        <input type="file" id="loadFileInput" accept=".json" style="display:none"
-                            onchange="loadAnimationFile(event)">
-                        <div id="savedAnimList" style="display:flex;flex-direction:column;gap:5px"></div>
-                    </div>
-
-                    <div>
-                        <div class="panel-title" style="margin-bottom:8px">Keyboard</div>
-                        <button class="apply-btn" onclick="saveToFlash()" style="font-size:0.68rem;background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
-                        <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.7">
-                            Playback pushes each frame<br>live to the keyboard automatically
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Scripts: load order matters — layout data first, then main logic, then anim -->
     <script src="layout.js"></script>
     <script src="main.js"></script>
     <script src="anim.js"></script>

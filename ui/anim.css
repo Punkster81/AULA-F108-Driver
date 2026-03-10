@@ -1,73 +1,11 @@
-/* ── Animation panel overlay ── */
-#animPanel {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.85);
-    z-index: 100;
-    backdrop-filter: blur(4px);
-    align-items: center;
-    justify-content: center;
-}
-
-#animPanel.open {
-    display: flex;
-}
-
-.anim-modal {
-    background: #0f0f14;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    width: min(1200px, 98vw);
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.8);
-}
-
-.anim-header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 18px 24px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-}
-
-.anim-header h2 {
-    font-family: 'Syne', sans-serif;
-    font-size: 1rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    flex: 1;
-}
-
-.anim-header h2 span {
-    color: var(--accent);
-}
-
-.anim-body {
-    display: grid;
-    grid-template-columns: 1fr 280px;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.anim-main {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    overflow: hidden;
-    border-right: 1px solid var(--border);
-}
-
-/* ── Frame timeline ── */
+/* ── Animation inline mode ── */
+/* Timeline sits below the keyboard inside .kb-area */
+/* ── Frame timeline (inline below keyboard) ── */
 .timeline-wrap {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px 0 4px;
+    border-top: 1px solid var(--border);
     flex-shrink: 0;
+    margin-top: 8px;
 }
 
 .timeline-label {
@@ -172,102 +110,6 @@
     color: var(--accent);
 }
 
-/* ── Mini keyboard in animation editor ── */
-.anim-kb-area {
-    flex: 1;
-    overflow: auto;
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.mini-keyboard {
-    background: #0d0d12;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    width: fit-content;
-}
-
-.mini-key {
-    height: 28px;
-    min-width: 28px;
-    border-radius: 3px;
-    cursor: pointer;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.38rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.4);
-    background: var(--key-off);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    transition: transform 0.08s;
-    user-select: none;
-    flex-shrink: 0;
-    overflow: hidden;
-}
-
-.mini-key::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: var(--key-color, transparent);
-    opacity: 0.85;
-    border-radius: inherit;
-}
-
-.mini-key span {
-    position: relative;
-    z-index: 1;
-}
-
-.mini-key:hover {
-    transform: scale(1.1);
-    border-color: rgba(255, 255, 255, 0.15);
-}
-
-.mini-key.lit {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-/* Key size variants for mini */
-.mk-15 {
-    min-width: 42px;
-}
-
-.mk-175 {
-    min-width: 49px;
-}
-
-.mk-2 {
-    min-width: 60px;
-}
-
-.mk-225 {
-    min-width: 66px;
-}
-
-.mk-275 {
-    min-width: 80px;
-}
-
-.mk-650 {
-    min-width: 170px;
-}
-
-.mk-spacer {
-    min-width: 5px;
-    background: transparent;
-    border: none;
-    cursor: default;
-    pointer-events: none;
-}
 
 /* ── Anim side panel ── */
 .anim-side {
