@@ -119,16 +119,137 @@ def animations_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
+def lighting_dir():
+    """Returns (and creates if needed) the 'lighting' folder next to main.py / the exe."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, 'lighting')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def colors_dir():
+    """Returns (and creates if needed) the 'colors' folder next to main.py / the exe."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, 'colors')
+    os.makedirs(d, exist_ok=True)
+    return d
+
 class AnimationAPI:
     def save_current_animation(self, data):
-        """Save animation as current_animation.json next to the app."""
+        """Save animation as current_animation.json and also write current.json pointer."""
         try:
-            path = os.path.join(animations_dir(), 'current_animation.json')
-            with open(path, 'w', encoding='utf-8') as f:
+            anim_path = os.path.join(animations_dir(), 'current_animation.json')
+            with open(anim_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-            return {'ok': True, 'path': path}
+            current = {'type': 'animation', 'file': anim_path}
+            with open(os.path.join(lighting_dir(), 'current.json'), 'w', encoding='utf-8') as f:
+                json.dump(current, f, indent=2)
+            return {'ok': True, 'path': anim_path}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
+
+    # ── Static lighting persistence ────────────────────────────────────────────
+    def save_static_lighting(self, name, colors):
+        """Save a static color map to lighting/<name>.json. Also updates current.json."""
+        try:
+            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'lighting'
+            fname = safe.replace(' ', '_').lower() + '.json'
+            data = {'name': name, 'type': 'static', 'colors': colors}
+            path = os.path.join(lighting_dir(), fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def save_current_lighting(self, colors):
+        """Overwrite lighting/current.json with the latest static color state."""
+        try:
+            data = {'type': 'static', 'colors': colors}
+            with open(os.path.join(lighting_dir(), 'current.json'), 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def load_current_lighting(self):
+        """
+        Read lighting/current.json and return the last-used state.
+        Returns {ok, type, colors} for static, or {ok, type, animation} for animation.
+        """
+        try:
+            path = os.path.join(lighting_dir(), 'current.json')
+            if not os.path.exists(path):
+                return {'ok': False, 'reason': 'no_current'}
+            with open(path, 'r', encoding='utf-8') as f:
+                current = json.load(f)
+            if current.get('type') == 'animation':
+                anim_path = current.get('file', '')
+                if not os.path.exists(anim_path):
+                    return {'ok': False, 'reason': 'missing_file'}
+                with open(anim_path, 'r', encoding='utf-8') as f:
+                    anim = json.load(f)
+                return {'ok': True, 'type': 'animation', 'animation': anim}
+            else:
+                return {'ok': True, 'type': 'static', 'colors': current.get('colors', {})}
+        except Exception as e:
+            return {'ok': False, 'reason': str(e)}
+
+    def list_static_lightings(self):
+        """List all saved static lighting presets."""
+        try:
+            results = []
+            d = lighting_dir()
+            for fname in sorted(os.listdir(d)):
+                if fname == 'current.json' or not fname.lower().endswith('.json'):
+                    continue
+                try:
+                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if data.get('type') == 'static':
+                        data['_filename'] = fname
+                        results.append(data)
+                except Exception:
+                    pass
+            return {'ok': True, 'lightings': results}
+        except Exception as e:
+            return {'ok': False, 'lightings': [], 'message': str(e)}
+
+    def delete_static_lighting(self, filename):
+        """Delete a static lighting preset file."""
+        try:
+            path = os.path.join(lighting_dir(), os.path.basename(filename))
+            if os.path.exists(path):
+                os.remove(path)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def save_recent_colors(self, colors):
+        """Save up to 18 recent colors to colors/recent.json."""
+        try:
+            path = os.path.join(colors_dir(), 'recent.json')
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(colors[:18], f)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def load_recent_colors(self):
+        """Load recent colors from colors/recent.json."""
+        try:
+            path = os.path.join(colors_dir(), 'recent.json')
+            if not os.path.exists(path):
+                return {'ok': False, 'colors': []}
+            with open(path, 'r', encoding='utf-8') as f:
+                return {'ok': True, 'colors': json.load(f)}
+        except Exception as e:
+            return {'ok': False, 'colors': [], 'message': str(e)}
 
     def save_animation(self, name, data):
         """

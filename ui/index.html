@@ -16,7 +16,8 @@
         <div class="status-bar">
             <div class="status-dot"></div>
             <span id="conn-status">Not connected</span>
-            <button class="tb-btn" onclick="connectKeyboard()" style="font-size:0.65rem;padding:4px 12px">⚡ CONNECT</button>
+            <button class="tb-btn" onclick="connectKeyboard()" style="font-size:0.65rem;padding:4px 12px">⚡
+                CONNECT</button>
             <span class="footer-tag">VID:0C45 PID:800A</span>
         </div>
     </header>
@@ -29,18 +30,20 @@
             <div id="staticLeft">
                 <div class="panel-title">Color</div>
                 <div class="color-picker-wrap">
-                    <div class="color-preview" id="colorPreview" onclick="document.getElementById('colorInput').click()">
+                    <div class="color-preview" id="colorPreview"
+                        onclick="document.getElementById('colorInput').click()">
                         <input type="color" id="colorInput" value="#ff0000">
                     </div>
                     <div class="rgb-row">
-                        <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255" value="255"></div>
-                        <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255" value="0"></div>
-                        <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255" value="0"></div>
+                        <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255"
+                                value="255"></div>
+                        <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255"
+                                value="0"></div>
+                        <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255"
+                                value="0"></div>
                     </div>
-                </div>
-                <div>
-                    <div class="panel-title" style="margin-bottom:10px">Swatches</div>
-                    <div class="swatch-grid" id="swatchGrid"></div>
+                    <button class="tb-btn mode-btn" id="eyedropperBtn" onclick="toggleEyedropper()"
+                        style="width:100%;margin-top:2px">🔬 Color Picker</button>
                 </div>
                 <div>
                     <div class="panel-title" style="margin-bottom:10px">Effects</div>
@@ -71,9 +74,21 @@
             <div id="animLeft" style="display:none">
                 <div class="panel-title">Frame Color</div>
                 <div class="color-picker-wrap">
-                    <div class="color-preview" id="animColorPreviewBlock" onclick="document.getElementById('animColorPicker').click()">
+                    <div class="color-preview" id="animColorPreviewBlock"
+                        onclick="document.getElementById('animColorPicker').click()">
                         <input type="color" id="animColorPicker" value="#ff0000">
                     </div>
+                    <div class="rgb-row">
+                        <div class="rgb-input"><label>R</label><input type="number" id="rValAnim" min="0" max="255"
+                                value="255" oninput="syncAnimFromRGB()"></div>
+                        <div class="rgb-input"><label>G</label><input type="number" id="gValAnim" min="0" max="255"
+                                value="0" oninput="syncAnimFromRGB()"></div>
+                        <div class="rgb-input"><label>B</label><input type="number" id="bValAnim" min="0" max="255"
+                                value="0" oninput="syncAnimFromRGB()"></div>
+                    </div>
+                    <button class="tb-btn mode-btn" id="eyedropperBtnAnim" onclick="toggleEyedropper()"
+                        style="width:100%;margin-top:2px">🔬 Color Picker</button>
+
                 </div>
 
                 <div class="frame-actions" style="margin-top:14px">
@@ -88,12 +103,34 @@
                     <div class="panel-title" style="margin-bottom:10px">Frame Settings</div>
                     <div class="duration-row">
                         <label>DURATION</label>
-                        <input type="number" id="frameDuration" min="16" max="9999" value="100"
+                        <input type="number" id="frameDuration" min="50" max="9999" value="100"
                             oninput="updateFrameDuration()">
                         <span>ms</span>
                     </div>
-                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px">16ms ≈ 60fps · 33ms ≈ 30fps</div>
+                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px">50ms min recommended · 100ms = 10fps
+                    </div>
                 </div>
+            </div>
+
+            <!-- SHARED: swatches + recent colors tabbed -->
+            <div style="margin-top:12px">
+                <div class="swatch-tabs">
+                    <button class="swatch-tab active-tab" id="swatchTabBtn"
+                        onclick="switchSwatchTab('swatches')">Swatches</button>
+                    <button class="swatch-tab" id="recentTabBtn" onclick="switchSwatchTab('recent')">Recent</button>
+                </div>
+                <div id="swatchesPane">
+                    <div class="swatch-grid" id="swatchGrid"></div>
+                </div>
+                <div id="recentPane" style="display:none">
+                    <div class="swatch-grid" id="recentGrid"></div>
+                    <div id="recentEmpty" style="font-size:0.6rem;color:var(--dim);display:none">No recent colors yet
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:12px" id="selPanel">
+                <div class="sel-empty">Click keys on the<br>keyboard to select</div>
             </div>
 
         </div>
@@ -101,8 +138,13 @@
         <!-- CENTER: Keyboard -->
         <div class="kb-area" id="kbArea">
             <div class="kb-toolbar" id="kbToolbar">
-                <button class="tb-btn" onclick="selectAll()">SELECT ALL</button>
-                <button class="tb-btn" onclick="clearSelection()">DESELECT</button>
+                <div class="mode-btn-group">
+                    <button class="tb-btn mode-btn active-mode" id="selectModeBtn" onclick="setPaintMode(false)">⬚
+                        SELECT</button>
+                    <button class="tb-btn mode-btn" id="paintModeBtn" onclick="setPaintMode(true)">✏ PAINT</button>
+                </div>
+                <button class="tb-btn" id="selectAllBtn" onclick="selectAll()">SELECT ALL</button>
+                <button class="tb-btn" id="deselectBtn" onclick="clearSelection()">DESELECT</button>
                 <button class="tb-btn danger" onclick="clearAll()">CLEAR ALL</button>
                 <span class="selection-info" id="selInfo">0 keys selected</span>
             </div>
@@ -112,7 +154,8 @@
             <!-- Timeline (hidden until anim mode) -->
             <div id="timelineWrap" class="timeline-wrap" style="display:none">
                 <div class="timeline-label">
-                    <span>FRAMES &nbsp;<span id="animFrameCount" style="color:var(--text);font-size:0.7rem">0</span></span>
+                    <span>FRAMES &nbsp;<span id="animFrameCount"
+                            style="color:var(--text);font-size:0.7rem">0</span></span>
                     <span id="totalDurationLabel" style="color:var(--text)">0ms total</span>
                 </div>
                 <div class="timeline" id="animTimeline">
@@ -126,7 +169,8 @@
                 <b style="color:var(--muted)">APPLY COLOR</b> in right panel
             </div>
             <div id="animHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
-                <b style="color:var(--accent2)">SELECT A FRAME</b> above · then <b style="color:var(--muted)">PAINT</b> keys · uses Frame Color from left panel
+                <b style="color:var(--accent2)">SELECT A FRAME</b> above · then <b style="color:var(--muted)">PAINT</b>
+                keys · uses Frame Color from left panel
             </div>
         </div>
 
@@ -135,16 +179,26 @@
 
             <!-- STATIC MODE right -->
             <div id="staticRight">
-                <div class="panel-title">Selection</div>
-                <div id="selPanel">
-                    <div class="sel-empty">Click keys on the<br>keyboard to select</div>
-                </div>
                 <div class="panel-title" style="margin-top:4px">Keyboard</div>
-                <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:8px">⚡ APPLY TO KEYBOARD</button>
-                <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
+                <button class="apply-btn" onclick="applyToKeyboard()" style="margin-bottom:8px">⚡ APPLY TO
+                    KEYBOARD</button>
+                <button class="apply-btn" onclick="saveToFlash()"
+                    style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
                 <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
                     <b style="color:var(--muted)">APPLY</b> streams colors live<br>
                     <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle (~2s)
+                </div>
+
+                <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Save Preset</div>
+                <input type="text" class="anim-name-input" id="lightingNameInput" placeholder="Preset name..."
+                    value="My Lighting">
+                <div style="height:6px"></div>
+                <button class="apply-btn" onclick="saveStaticLighting()" style="font-size:0.68rem">💾 SAVE
+                    PRESET</button>
+
+                <div class="panel-title" style="margin-top:12px;margin-bottom:6px">Saved Presets</div>
+                <div id="savedLightingList" style="display:flex;flex-direction:column;gap:5px">
+                    <div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>
                 </div>
             </div>
 
@@ -169,7 +223,8 @@
                     <input type="text" class="anim-name-input" id="animNameInput" placeholder="Animation name..."
                         value="My Animation">
                     <div style="height:8px"></div>
-                    <button class="apply-btn" onclick="saveAnimation()" style="font-size:0.68rem">💾 SAVE TO FILE</button>
+                    <button class="apply-btn" onclick="saveAnimation()" style="font-size:0.68rem">💾 SAVE TO
+                        FILE</button>
                 </div>
 
                 <div>
@@ -181,10 +236,12 @@
 
                 <div>
                     <div class="panel-title" style="margin-bottom:8px">Active Animation</div>
-                    <button class="play-btn" id="activeAnimBtn" onclick="setAsActiveAnimation()" style="width:100%;margin-bottom:6px">▶ SET AS ACTIVE</button>
+                    <button class="play-btn" id="activeAnimBtn" onclick="setAsActiveAnimation()"
+                        style="width:100%;margin-bottom:6px">▶ SET AS ACTIVE</button>
                     <div style="font-size:0.58rem;color:var(--dim);line-height:1.7" id="activeAnimStatus"></div>
                     <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.7">
-                        Loops on keyboard continuously.<br>Saved as <b style="color:var(--muted)">current_animation.json</b><br>for auto-boot in a future update.
+                        Loops on keyboard continuously.<br>Saved as <b
+                            style="color:var(--muted)">current_animation.json</b><br>for auto-boot in a future update.
                     </div>
                 </div>
 
@@ -208,4 +265,5 @@
     <script src="anim.js"></script>
 
 </body>
+
 </html>

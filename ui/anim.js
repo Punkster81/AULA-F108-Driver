@@ -54,7 +54,7 @@ function selectAnimFrame(idx) {
 function updateFrameDuration() {
     if (activeAnimFrame < 0) return;
     const v = parseInt(document.getElementById('frameDuration').value) || 100;
-    animFrames[activeAnimFrame].duration = Math.max(16, v);
+    animFrames[activeAnimFrame].duration = Math.max(50, v);
     const thumbs = document.querySelectorAll('.frame-thumb');
     if (thumbs[activeAnimFrame]) {
         thumbs[activeAnimFrame].querySelector('.frame-duration').textContent = animFrames[activeAnimFrame].duration + 'ms';
@@ -273,6 +273,13 @@ function playNextFrame() {
     const frame = animFrames[previewFrameIdx];
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
     loadFrameIntoMain(previewFrameIdx);
+    if (window.pywebview && window.pywebview.api) {
+        const payload = {};
+        Object.entries(frame.colors || {}).forEach(([idx, { r, g, b }]) => {
+            if (r || g || b) payload[idx] = [r, g, b];
+        });
+        window.pywebview.api.apply_frame(payload);
+    }
     previewFrameIdx++;
     previewTimer = setTimeout(playNextFrame, frame.duration);
 }
@@ -457,7 +464,7 @@ let animModeActive = false;
 
 function openAnimPanel() {
     animModeActive = true;
-    clearSelection();
+    setPaintMode(true);
     document.getElementById('staticLeft').style.display = 'none';
     document.getElementById('animLeft').style.display = 'block';
     document.getElementById('timelineWrap').style.display = 'block';
@@ -475,7 +482,7 @@ function openAnimPanel() {
 
 function closeAnimPanel() {
     animModeActive = false;
-    clearSelection();
+    setPaintMode(false);
     stopPreview();
     stopActiveAnim();
     document.getElementById('staticLeft').style.display = 'block';
@@ -508,25 +515,19 @@ function toggleAnimPanel() {
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
-
     const animPicker = document.getElementById('animColorPicker');
-    const animPreview = document.getElementById('animColorPreview');
-
+    const previewBlock = document.getElementById('animColorPreviewBlock');
     if (!animPicker) return;
-
     animPicker.addEventListener('input', () => {
         const hex = animPicker.value;
-
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
-
         animPaintColor = { r, g, b };
-
-        if (animPreview)
-            animPreview.style.background = hex;
+        if (previewBlock) previewBlock.style.background = hex;
+        // Keep main color picker + anim RGB inputs in sync
+        if (typeof setColorHex === 'function') setColorHex(hex);
     });
-
 });
 
 // Start with one empty frame

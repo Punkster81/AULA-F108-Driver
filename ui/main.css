@@ -195,6 +195,38 @@
     }
 
     /* ── Swatches ── */
+    .swatch-tabs {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        margin-bottom: 10px;
+    }
+
+    .swatch-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        border-right: 1px solid var(--border);
+        color: var(--dim);
+        font-family: inherit;
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 6px 0;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+    }
+
+    .swatch-tab:last-child { border-right: none; }
+
+    .swatch-tab.active-tab {
+        color: var(--accent);
+        background: rgba(124, 108, 255, 0.12);
+    }
+
     .swatch-grid {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
@@ -309,6 +341,30 @@
 
     .tb-btn.danger:hover {
         background: rgba(255, 68, 68, 0.1);
+    }
+
+    .mode-btn-group {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        gap: 0;
+    }
+
+    .mode-btn-group .mode-btn {
+        border-radius: 0;
+        border: none;
+        border-right: 1px solid var(--border);
+        color: var(--dim);
+    }
+
+    .mode-btn-group .mode-btn:last-child {
+        border-right: none;
+    }
+
+    .mode-btn-group .mode-btn.active-mode {
+        color: var(--accent);
+        background: rgba(124, 108, 255, 0.12);
     }
 
     .selection-info {

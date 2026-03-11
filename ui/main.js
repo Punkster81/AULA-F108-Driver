@@ -38,18 +38,37 @@ function setColorHex(hex) {
     const b = parseInt(hex.slice(5, 7), 16);
     rVal.value = r; gVal.value = g; bVal.value = b;
     colorPreview.style.background = hex;
+    // Always keep anim picker + anim RGB inputs in sync
+    if (typeof animPaintColor !== 'undefined') {
+        animPaintColor = { r, g, b };
+        const ap = document.getElementById('animColorPicker');
+        const apb = document.getElementById('animColorPreviewBlock');
+        const ra = document.getElementById('rValAnim');
+        const ga = document.getElementById('gValAnim');
+        const ba = document.getElementById('bValAnim');
+        if (ap) ap.value = hex;
+        if (apb) apb.style.background = hex;
+        if (ra) ra.value = r;
+        if (ga) ga.value = g;
+        if (ba) ba.value = b;
+    }
 }
 function syncFromPicker() {
-    const hex = colorInput.value;
-    setColorHex(hex);
+    setColorHex(colorInput.value);
 }
 function syncFromRGB() {
     const r = Math.min(255, Math.max(0, parseInt(rVal.value) || 0));
     const g = Math.min(255, Math.max(0, parseInt(gVal.value) || 0));
     const b = Math.min(255, Math.max(0, parseInt(bVal.value) || 0));
     const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
-    colorInput.value = hex;
-    colorPreview.style.background = hex;
+    setColorHex(hex);
+}
+function syncAnimFromRGB() {
+    const r = Math.min(255, Math.max(0, parseInt(document.getElementById('rValAnim').value) || 0));
+    const g = Math.min(255, Math.max(0, parseInt(document.getElementById('gValAnim').value) || 0));
+    const b = Math.min(255, Math.max(0, parseInt(document.getElementById('bValAnim').value) || 0));
+    const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    setColorHex(hex);
 }
 colorInput.addEventListener('input', syncFromPicker);
 rVal.addEventListener('input', syncFromRGB);
@@ -135,33 +154,112 @@ keyboard.appendChild(kbWrap);
 
 document.addEventListener('mouseup', () => { painting = false; paintColor = null; });
 
+// ── Paint / Select mode toggle ────────────────────────────────────────────────
+let paintMode = false;
+let eyedropperMode = false;
+
+function setPaintMode(on) {
+    paintMode = on;
+    eyedropperMode = false;
+    document.getElementById('selectModeBtn').classList.toggle('active-mode', !on);
+    document.getElementById('paintModeBtn').classList.toggle('active-mode', on);
+    [document.getElementById('eyedropperBtn'), document.getElementById('eyedropperBtnAnim')]
+        .forEach(b => b && b.classList.remove('active-mode'));
+    document.getElementById('keyboard').style.cursor = '';
+    const selectAll = document.getElementById('selectAllBtn');
+    const deselect = document.getElementById('deselectBtn');
+    if (on) {
+        clearSelection();
+        selectAll.disabled = true;
+        deselect.disabled = true;
+        selectAll.style.opacity = '0.35';
+        deselect.style.opacity = '0.35';
+    } else {
+        selectAll.disabled = false;
+        deselect.disabled = false;
+        selectAll.style.opacity = '';
+        deselect.style.opacity = '';
+    }
+}
+
+function toggleEyedropper() {
+    eyedropperMode = !eyedropperMode;
+    const btns = [document.getElementById('eyedropperBtn'), document.getElementById('eyedropperBtnAnim')];
+    if (eyedropperMode) {
+        paintMode = false;
+        document.getElementById('selectModeBtn').classList.remove('active-mode');
+        document.getElementById('paintModeBtn').classList.remove('active-mode');
+        btns.forEach(b => b && b.classList.add('active-mode'));
+        document.getElementById('keyboard').style.cursor = 'crosshair';
+    } else {
+        btns.forEach(b => b && b.classList.remove('active-mode'));
+        document.getElementById('keyboard').style.cursor = '';
+        document.getElementById('selectModeBtn').classList.add('active-mode');
+    }
+}
+
 function onKeyDown(e, k) {
     e.preventDefault();
     painting = true;
     const idx = k.dataset.idx;
-    // In anim mode: paint the active frame directly, no selection
-    if (typeof animModeActive !== 'undefined' && animModeActive) {
-        animPaintKey(idx);
+
+    if (eyedropperMode) {
+        // Pick color from this key
+        const source = (typeof animModeActive !== 'undefined' && animModeActive && activeAnimFrame >= 0)
+            ? (animFrames[activeAnimFrame].colors[idx] || null)
+            : (keyColors[idx] || null);
+        if (source) {
+            const hex = '#' + [source.r, source.g, source.b].map(x => x.toString(16).padStart(2, '0')).join('');
+            setColorHex(hex);
+            toast('Color picked');
+        } else {
+            toast('Key has no color');
+        }
+        toggleEyedropper();  // auto-exit eyedropper after one pick
+        painting = false;
         return;
     }
-    if (!e.shiftKey) {
-        if (selected.has(idx)) { selected.delete(idx); k.classList.remove('selected'); }
-        else { selected.add(idx); k.classList.add('selected'); }
+
+    if (paintMode) {
+        if (typeof animModeActive !== 'undefined' && animModeActive) {
+            animPaintKey(idx);
+        } else {
+            const { r, g, b } = getCurrentRGB();
+            keyColors[idx] = { r, g, b };
+            paintKey(idx, r, g, b);
+            updateFooter();
+        }
+        // Track color on initial click (not every drag pixel)
+        const hex = colorInput.value;
+        addRecentColor(hex);
+    } else {
+        if (!e.shiftKey) {
+            if (selected.has(idx)) { selected.delete(idx); k.classList.remove('selected'); }
+            else { selected.add(idx); k.classList.add('selected'); }
+        } else {
+            selected.add(idx);
+            k.classList.add('selected');
+        }
+        updateSelPanel();
+    }
+}
+
+function onKeyPaint(k) {
+    const idx = k.dataset.idx;
+    if (paintMode) {
+        if (typeof animModeActive !== 'undefined' && animModeActive) {
+            animPaintKey(idx);
+        } else {
+            const { r, g, b } = getCurrentRGB();
+            keyColors[idx] = { r, g, b };
+            paintKey(idx, r, g, b);
+            updateFooter();
+        }
     } else {
         selected.add(idx);
         k.classList.add('selected');
+        updateSelPanel();
     }
-    updateSelPanel();
-}
-function onKeyPaint(k) {
-    const idx = k.dataset.idx;
-    if (typeof animModeActive !== 'undefined' && animModeActive) {
-        animPaintKey(idx);
-        return;
-    }
-    selected.add(idx);
-    k.classList.add('selected');
-    updateSelPanel();
 }
 
 // ── Selection ────────────────────────────────────────────────────────────────
@@ -204,12 +302,23 @@ function updateSelPanel() {
 function applyColorToSelected() {
     if (selected.size === 0) { toast('No keys selected'); return; }
     const { r, g, b } = getCurrentRGB();
-    selected.forEach(idx => {
-        keyColors[idx] = { r, g, b };
-        paintKey(idx, r, g, b);
-    });
-    updateFooter();
+    if (typeof animModeActive !== 'undefined' && animModeActive) {
+        if (typeof activeAnimFrame === 'undefined' || activeAnimFrame < 0) { toast('Select a frame first'); return; }
+        selected.forEach(idx => {
+            animFrames[activeAnimFrame].colors[idx] = { r, g, b };
+            paintKey(idx, r, g, b);
+        });
+        updateFrameThumb(activeAnimFrame);
+    } else {
+        selected.forEach(idx => {
+            keyColors[idx] = { r, g, b };
+            paintKey(idx, r, g, b);
+        });
+        updateFooter();
+    }
     toast(`Applied to ${selected.size} key${selected.size !== 1 ? 's' : ''}`);
+    const { r: cr, g: cg, b: cb } = getCurrentRGB();
+    addRecentColor('#' + [cr, cg, cb].map(x => x.toString(16).padStart(2, '0')).join(''));
     clearSelection();
 }
 
@@ -285,13 +394,62 @@ async function connectKeyboard() {
         dot.style.background = '#2ecc71';
         dot.style.boxShadow = '0 0 8px #2ecc71';
         toast('Connected!');
-        await pushColors();
+        await restoreLastLighting();
     } else {
         status.textContent = r.message;
         dot.style.background = '#ff4444';
         dot.style.boxShadow = '0 0 8px #ff4444';
         toast(r.message);
     }
+}
+
+async function restoreLastLighting() {
+    if (!hasPyAPI()) return;
+    const r = await window.pywebview.api.load_current_lighting();
+
+    if (r.ok && r.type === 'static') {
+        applyStaticColorMap(r.colors);
+        await pushColors();
+        return;
+    }
+
+    if (r.ok && r.type === 'animation') {
+        loadAnimationData(r.animation);
+        openAnimPanel();
+        setAsActiveAnimation();
+        return;
+    }
+
+    // No current.json — try first saved static preset
+    const ls = await window.pywebview.api.list_static_lightings();
+    if (ls.ok && ls.lightings.length > 0) {
+        applyStaticColorMap(ls.lightings[0].colors);
+        await pushColors();
+        return;
+    }
+
+    // No animation either — try first saved animation
+    const la = await window.pywebview.api.list_animations();
+    if (la.ok && la.animations.length > 0) {
+        loadAnimationData(la.animations[0]);
+        openAnimPanel();
+        setAsActiveAnimation();
+        return;
+    }
+
+    // Truly nothing saved — start blank
+    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
+    updateFooter();
+}
+
+function applyStaticColorMap(colors) {
+    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
+    Object.entries(colors).forEach(([idx, rgb]) => {
+        const [rv, gv, bv] = Array.isArray(rgb) ? rgb : [rgb.r, rgb.g, rgb.b];
+        keyColors[idx] = { r: rv, g: gv, b: bv };
+        paintKey(idx, rv, gv, bv);
+    });
+    updateFooter();
 }
 
 // ── Build color payload from current state ────────────────────────────────────
@@ -321,9 +479,121 @@ async function applyToKeyboard() {
 async function saveToFlash() {
     if (!hasPyAPI()) { toast('Not running in app — use python main.py'); return; }
     toast('Saving to flash (~2s)...');
-    const r = await window.pywebview.api.save_to_flash(buildPayload());
-    toast(r.ok ? '💾 ' + r.message : r.message);
+    const payload = buildPayload();
+    const r = await window.pywebview.api.save_to_flash(payload);
+    if (r.ok) {
+        window.pywebview.api.save_current_lighting(payload);
+        toast('💾 ' + r.message);
+    } else toast(r.message);
 }
+
+// ── Swatch tabs ───────────────────────────────────────────────────────────────
+function switchSwatchTab(tab) {
+    const isSwatches = tab === 'swatches';
+    document.getElementById('swatchesPane').style.display = isSwatches ? '' : 'none';
+    document.getElementById('recentPane').style.display = isSwatches ? 'none' : '';
+    document.getElementById('swatchTabBtn').classList.toggle('active-tab', isSwatches);
+    document.getElementById('recentTabBtn').classList.toggle('active-tab', !isSwatches);
+}
+
+// ── Recent colors ─────────────────────────────────────────────────────────────
+let recentColors = [];  // array of hex strings, most recent first
+const MAX_RECENT = 18;
+
+function addRecentColor(hex) {
+    hex = hex.toLowerCase();
+    recentColors = recentColors.filter(c => c !== hex);
+    recentColors.unshift(hex);
+    if (recentColors.length > MAX_RECENT) recentColors.length = MAX_RECENT;
+    renderRecentColors();
+    if (hasPyAPI()) window.pywebview.api.save_recent_colors(recentColors);
+}
+
+function renderRecentColors() {
+    const grid = document.getElementById('recentGrid');
+    const empty = document.getElementById('recentEmpty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (recentColors.length === 0) {
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    recentColors.forEach(hex => {
+        const s = document.createElement('div');
+        s.className = 'swatch';
+        s.style.background = hex;
+        s.onclick = () => setColorHex(hex);
+        grid.appendChild(s);
+    });
+}
+
+async function loadRecentColors() {
+    if (!hasPyAPI()) return;
+    const r = await window.pywebview.api.load_recent_colors();
+    if (r.ok && r.colors.length > 0) {
+        recentColors = r.colors;
+        renderRecentColors();
+    }
+}
+
+
+let savedLightings = {};
+
+async function saveStaticLighting() {
+    if (!hasPyAPI()) { toast('Run via python main.py'); return; }
+    const name = document.getElementById('lightingNameInput').value.trim() || 'lighting';
+    if (Object.keys(keyColors).length === 0) { toast('No colors to save'); return; }
+    const payload = buildPayload();
+    const r = await window.pywebview.api.save_static_lighting(name, payload);
+    if (r.ok) {
+        toast(`Saved "${name}"`);
+        await loadStaticLightingsFromDisk();
+    } else toast('Save failed: ' + (r.message || ''));
+}
+
+async function loadStaticLightingsFromDisk() {
+    if (!hasPyAPI()) return;
+    const r = await window.pywebview.api.list_static_lightings();
+    if (!r.ok) return;
+    savedLightings = {};
+    r.lightings.forEach(d => { savedLightings[d._filename] = d; });
+    renderSavedLightingList();
+}
+
+function applyStaticLightingData(data) {
+    applyStaticColorMap(data.colors || {});
+    toast(`Loaded "${data.name}"`);
+}
+
+async function deleteStaticLighting(filename) {
+    if (!hasPyAPI()) return;
+    await window.pywebview.api.delete_static_lighting(filename);
+    await loadStaticLightingsFromDisk();
+}
+
+function renderSavedLightingList() {
+    const el = document.getElementById('savedLightingList');
+    if (!el) return;
+    el.innerHTML = '';
+    const entries = Object.entries(savedLightings);
+    if (entries.length === 0) {
+        el.innerHTML = '<div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>';
+        return;
+    }
+    entries.forEach(([filename, data]) => {
+        const item = document.createElement('div');
+        item.className = 'saved-anim-item';
+        item.innerHTML = `
+  <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${data.name || filename}</span>
+  <button class="load-btn">LOAD</button>
+  <button class="del-btn">✕</button>`;
+        item.querySelector('.load-btn').addEventListener('click', () => applyStaticLightingData(data));
+        item.querySelector('.del-btn').addEventListener('click', () => deleteStaticLighting(filename));
+        el.appendChild(item);
+    });
+}
+
 
 function updateFooter() {
     const n = Object.values(keyColors).filter(c => c.r || c.g || c.b).length;
@@ -341,12 +611,15 @@ function toast(msg) {
 }
 
 // ── Auto-connect when PyWebView is ready ─────────────────────────────────────
-window.addEventListener('pywebviewready', () => connectKeyboard());
-
-// Init with rainbow on top row as preview
-['01', '02', '03', '04', '05', '06', '07', '08', '09', '0a', '0b', '0c', '0d'].forEach((idx, i, arr) => {
-    const rgb = hsvToRgb(i / arr.length, 1, 1);
-    keyColors[idx] = rgb;
-    paintKey(idx, rgb.r, rgb.g, rgb.b);
+window.addEventListener('pywebviewready', () => {
+    connectKeyboard();
+    loadStaticLightingsFromDisk();
+    loadRecentColors();
 });
+
+// Init — start blank, then try to preload saved lighting for visual display
+(async function initDisplay() {
+    if (!hasPyAPI()) return;  // will be handled on pywebviewready
+    // Try to show something before connect happens — handled in restoreLastLighting after connect
+})();
 updateFooter();

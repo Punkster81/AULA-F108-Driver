@@ -30,3 +30,8 @@ desktop.ini
 
 # Logs
 *.log
+
+# User customization data
+animations/
+lighting/
+colors/
