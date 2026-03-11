@@ -8,6 +8,43 @@ import sys
 import os
 import json
 import threading
+import winreg
+
+# ── Startup registry helpers ──────────────────────────────────────────────────
+_STARTUP_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_STARTUP_NAME = "AulaF108RGBDriver"
+
+def _get_exe_path():
+    if getattr(sys, 'frozen', False):
+        return f'"{sys.executable}"'
+    return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+
+def set_startup(enable: bool) -> bool:
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
+        if enable:
+            winreg.SetValueEx(key, _STARTUP_NAME, 0, winreg.REG_SZ, _get_exe_path())
+        else:
+            try:
+                winreg.DeleteValue(key, _STARTUP_NAME)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+        return True
+    except Exception as e:
+        print(f"Startup registration failed: {e}")
+        return False
+
+def is_startup_enabled() -> bool:
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _STARTUP_KEY, 0, winreg.KEY_READ)
+        winreg.QueryValueEx(key, _STARTUP_NAME)
+        winreg.CloseKey(key)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
 import webview
 
 # ── Path helper (works both from source and PyInstaller bundle) ───────────────
@@ -91,7 +128,7 @@ class KeyboardAPI:
     # ── Flash save ─────────────────────────────────────────────────────────────
     def save_to_flash(self, colors):
         """
-        Burn colors to onboard flash. Blocks ~2s.
+        Burn colors to onboard flash.
         Returns {ok, message}.
         """
         with self._lock:
@@ -250,6 +287,15 @@ class AnimationAPI:
                 return {'ok': True, 'colors': json.load(f)}
         except Exception as e:
             return {'ok': False, 'colors': [], 'message': str(e)}
+
+    def get_startup_enabled(self):
+        """Return whether the app is registered to launch on Windows startup."""
+        return {'ok': True, 'enabled': is_startup_enabled()}
+
+    def set_startup_enabled(self, enable):
+        """Register or deregister the app from Windows startup."""
+        ok = set_startup(bool(enable))
+        return {'ok': ok}
 
     def save_animation(self, name, data):
         """

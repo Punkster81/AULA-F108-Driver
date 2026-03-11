@@ -310,13 +310,13 @@ class AulaF108Pro:
     def save(self):
         """
         Burn current colors to onboard flash (survives power cycle).
-        Takes ~2 seconds. Streaming resumes automatically after.
+        Takes a couple seconds. Streaming resumes automatically after.
         """
         was_running = self._running
         self.stop()
         with self._lock:
             colors = dict(self._colors)
-        print("Saving to flash (~2s)...")
+        print("Saving to flash...")
         _save_to_flash(self._h, colors)
         _handshake(self._h)
         print("Saved. Colors will persist after power cycle.")
