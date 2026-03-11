@@ -12,7 +12,7 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 ## Features
 
 - Full per-key RGB control
-- Live streaming (~30fps) with no flicker
+- Live streaming (~10fps) with no flicker
 - Save colors to onboard flash (persists after power cycle)
 - Custom animation editor with frame timeline
 - Save/load animations as JSON
