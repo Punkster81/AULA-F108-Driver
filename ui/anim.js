@@ -13,6 +13,11 @@ function animPaintKey(idx) {
 }
 
 function loadFrameIntoMain(frameIdx) {
+    // In layers mode, the compositor handles screen rendering — just trigger a refresh
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        if (typeof _refreshKeyboard === 'function') _refreshKeyboard();
+        return;
+    }
     Object.keys(keyEls).forEach(idx => paintKey(idx, 0, 0, 0));
     if (frameIdx < 0 || !animFrames[frameIdx]) return;
     Object.entries(animFrames[frameIdx].colors || {}).forEach(([idx, {r, g, b}]) => paintKey(idx, r, g, b));
@@ -250,16 +255,22 @@ function playNextFrame() {
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
     loadFrameIntoMain(previewFrameIdx);
 
-    // If previewing a layer animation, keep layer._frameIdx in sync so the
-    // compositor reads the correct frame instead of fighting the preview
+    // Sync layer._frameIdx so compositor reads the right frame
     if (typeof _layerAnimActive !== 'undefined' && _layerAnimActive) {
         const layer = typeof getActiveLayer === 'function' ? getActiveLayer() : null;
         if (layer) layer._frameIdx = previewFrameIdx;
     }
 
     if (window.pywebview?.api) {
-        const payload = {};
-        Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+        let payload = {};
+        if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen
+            && typeof compositeLayers === 'function') {
+            // Send full composite so all layers (static + animated) appear on hardware
+            const merged = compositeLayers();
+            Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+        } else {
+            Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+        }
         window.pywebview.api.apply_frame(payload);
     }
     previewFrameIdx++;

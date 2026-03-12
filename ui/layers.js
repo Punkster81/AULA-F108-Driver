@@ -510,6 +510,7 @@ function toggleEraser() {
         eyedropperMode = false;
         document.querySelectorAll('.eyedropper-btn').forEach(b => b.classList.remove('active-mode'));
     }
+    if (typeof updateSelPanel === 'function') updateSelPanel();
 }
 
 function deactivateEraser() {
@@ -568,6 +569,8 @@ function _mountLayerAnimEditor(layer) {
     document.getElementById('layerAnimControls').style.display = 'block';
 
     renderTimeline();
+    updateAnimFrameCount();
+    updateTotalDuration();
     if (animFrames.length > 0) selectAnimFrame(activeAnimFrame);
     else addFrame();
 

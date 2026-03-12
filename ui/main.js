@@ -301,11 +301,22 @@ function updateSelPanel() {
         const el = keyEls[idx];
         return el ? el.querySelector('span').textContent : `0x${idx}`;
     }).slice(0, 8).join(', ') + (selected.size > 8 ? '...' : '');
+    const inEraser = typeof eraserMode !== 'undefined' && eraserMode;
     panel.innerHTML = `
     <div class="sel-count">${selected.size}</div>
     <div class="sel-label">KEYS SELECTED</div>
     <div style="font-size:0.62rem;color:var(--dim);margin:10px 0 14px;line-height:1.7">${names}</div>
-    <button class="apply-btn" onclick="applyColorToSelected()">APPLY COLOR</button>`;
+    ${inEraser
+        ? `<button class="apply-btn" style="background:#2a1a1a;border-color:#e74c3c;color:#e74c3c" onclick="eraseSelected()">⬜ ERASE SELECTED</button>`
+        : `<button class="apply-btn" onclick="applyColorToSelected()">APPLY COLOR</button>`
+    }`;
+}
+
+function eraseSelected() {
+    if (selected.size === 0) { toast('No keys selected'); return; }
+    [...selected].forEach(idx => activeMode.onKeyPaint(idx)); // eraserMode intercepts via layerPaintKey
+    toast(`Erased ${selected.size} key${selected.size !== 1 ? 's' : ''}`);
+    clearSelection();
 }
 
 function applyColorToSelected() {
