@@ -310,3 +310,12 @@
     border-color: #ff6464;
     color: #ff6464;
 }
+
+/* ── Layer drag-drop ── */
+.layer-card[draggable] { cursor: grab; }
+.layer-card[draggable]:active { cursor: grabbing; }
+.layer-dragging { opacity: 0.4; }
+.layer-drag-over {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}

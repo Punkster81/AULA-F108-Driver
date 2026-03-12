@@ -399,6 +399,25 @@ async function restoreLastLighting() {
     const r = await window.pywebview.api.load_current_lighting();
     if (r.ok && r.type === 'static') { applyStaticColorMap(r.colors); await pushColors(); return; }
     if (r.ok && r.type === 'animation') { loadAnimationData(r.animation); openAnimPanel(); setAsActiveAnimation(); return; }
+    if (r.ok && r.type === 'layers') {
+        // Restore layer stack: open layers panel, deserialize, start streaming
+        openLayersPanel();
+        _deserializeLayers(r.layers);
+        renderLayerStrip();
+        // Auto-apply: start streaming if any animation layers, else static snapshot
+        const hasAnim = layers.some(l => l.type === 'animation' && l.enabled);
+        setLayerViewMode('composite');
+        if (hasAnim) {
+            applyLayersActive = true;
+            _startAllLayerAnims();
+            startCompositor();
+            if (typeof _syncAllPlayBtns === 'function') _syncAllPlayBtns(true);
+        } else {
+            applyLayersActive = false;
+            _sendStaticSnapshot();
+        }
+        return;
+    }
 
     const ls = await window.pywebview.api.list_static_lightings();
     if (ls.ok && ls.lightings.length > 0) { applyStaticColorMap(ls.lightings[0].colors); await pushColors(); return; }

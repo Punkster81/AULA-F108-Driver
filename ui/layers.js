@@ -113,7 +113,25 @@ function _paintKeyboardFromMap(colorMap) {
     });
 }
 
+function _stopAllPlayback() {
+    applyLayersActive = false;
+    isPlaying = false;
+    clearTimeout(previewTimer);
+    _stopAllLayerAnims();
+    if (typeof _syncAllPlayBtns === 'function') _syncAllPlayBtns(false);
+}
+
 function _startAllLayerAnims() {
+    // Fresh start from frame 0
+    layers.forEach(l => {
+        if (l.type === 'animation' && l.enabled) {
+            l._frameIdx = 0;
+            _startLayerAnim(l);
+        }
+    });
+}
+function _resumeAllLayerAnims() {
+    // Resume from current frame position (used when switching layers mid-play)
     layers.forEach(l => { if (l.type === 'animation' && l.enabled) _startLayerAnim(l); });
 }
 function _stopAllLayerAnims() {
@@ -124,8 +142,9 @@ function _stopAllLayerAnims() {
 function _startLayerAnim(layer) {
     if (layer.type !== 'animation') return;
     _stopLayerAnim(layer);
-    layer._frameIdx = 0;
-    layer._running  = true;
+    // Preserve current frame position — don't reset to 0
+    if (layer._frameIdx === undefined) layer._frameIdx = 0;
+    layer._running = true;
     _scheduleNextTick(layer);
 }
 function _stopLayerAnim(layer) {
@@ -149,6 +168,20 @@ function _scheduleNextTick(layer) {
 }
 
 // ── Layer CRUD ────────────────────────────────────────────────────────────────
+function _normalizeColor(c) {
+    if (!c) return null;
+    if (Array.isArray(c)) return { r: c[0] || 0, g: c[1] || 0, b: c[2] || 0 };
+    return { r: c.r || 0, g: c.g || 0, b: c.b || 0 };
+}
+function _normalizeColors(colors) {
+    const out = {};
+    Object.entries(colors || {}).forEach(([idx, c]) => {
+        const n = _normalizeColor(c);
+        if (n) out[idx] = n;
+    });
+    return out;
+}
+
 function _makeLayer(type, name, data) {
     const base = {
         id: nextLayerId(), name: name || 'Layer', type,
@@ -156,13 +189,13 @@ function _makeLayer(type, name, data) {
         _frameIdx: 0, _timer: null, _running: false
     };
     if (type === 'static') {
-        return { ...base, colors: JSON.parse(JSON.stringify(data.colors || {})) };
+        return { ...base, colors: _normalizeColors(data.colors || {}) };
     }
     return {
         ...base,
         frames: (data.frames || []).map(f => ({
             duration: f.duration || 100,
-            colors: JSON.parse(JSON.stringify(f.colors || {}))
+            colors: _normalizeColors(f.colors || {})
         })),
         loop: data.loop !== false
     };
@@ -170,7 +203,7 @@ function _makeLayer(type, name, data) {
 
 function addLayer(type, name, data) {
     const layer = _makeLayer(type, name, data);
-    layers.unshift(layer);
+    layers.push(layer);  // add to end (bottom of stack)
     if (type === 'animation' && applyLayersActive) _startLayerAnim(layer);
     selectLayer(layer.id);
     renderLayerStrip();
@@ -180,14 +213,29 @@ function addLayer(type, name, data) {
 function removeLayer(id) {
     const idx = layers.findIndex(l => l.id === id);
     if (idx < 0) return;
+    // If removing the layer currently in the anim editor, unmount first
+    if (_layerAnimActive && activeLayerId === id) _unmountLayerAnimEditor(true);
     _stopLayerAnim(layers[idx]);
     layers.splice(idx, 1);
     if (activeLayerId === id) activeLayerId = layers[0]?.id || null;
     renderLayerStrip();
     _refreshKeyboard();
+    // Mount anim editor if the newly active layer is animation, unmount if not
+    const nowActive = getActiveLayer();
+    if (nowActive && nowActive.type === 'animation' && !_layerAnimActive) {
+        _mountLayerAnimEditor(nowActive);
+    } else if ((!nowActive || nowActive.type !== 'animation') && _layerAnimActive) {
+        _unmountLayerAnimEditor(true);
+    }
+    _syncLayerAnimControls();
 }
 
 function selectLayer(id) {
+    // Stop all preview and animations when switching layers
+    if (applyLayersActive || (typeof isPlaying !== 'undefined' && isPlaying)) {
+        _stopAllPlayback();
+    }
+
     // Unmount anim editor from previous layer before switching
     if (_layerAnimActive) _unmountLayerAnimEditor();
 
@@ -204,8 +252,7 @@ function selectLayer(id) {
     } else {
         // Switched to a static layer — stop hardware streaming
         if (applyLayersActive && layerViewMode !== 'composite') {
-            applyLayersActive = false;
-            _syncAllPlayBtns(false);
+            _stopAllPlayback();
         }
     }
 }
@@ -254,7 +301,8 @@ function toggleLayerEnabled(id) {
     if (!layer) return;
     layer.enabled = !layer.enabled;
     if (layer.type === 'animation') {
-        layer.enabled && applyLayersActive ? _startLayerAnim(layer) : _stopLayerAnim(layer);
+        const shouldRun = layer.enabled && (applyLayersActive || (typeof isPlaying !== 'undefined' && isPlaying));
+        shouldRun ? _startLayerAnim(layer) : _stopLayerAnim(layer);
     }
     renderLayerStrip();
 }
@@ -364,6 +412,8 @@ function addStaticLayerFromCurrent() {
 }
 function addAnimLayerFromCurrent() {
     if (!animFrames.length) { toast('No animation frames'); return; }
+    const hasColors = animFrames.some(f => Object.keys(f.colors || {}).length > 0);
+    if (!hasColors) { toast('No colors in current animation — paint some keys first'); return; }
     const name = prompt('Layer name:', document.getElementById('animNameInput')?.value || 'Anim Layer') || 'Anim Layer';
     addLayer('animation', name, {
         loop: document.getElementById('loopAnim')?.checked !== false,
@@ -405,6 +455,8 @@ function setLayerViewMode(mode) {
 }
 
 // ── Render layer strip (replaces timeline) ───────────────────────────────────
+let _dragSrcLayerIdx = null;
+
 function renderLayerStrip() {
     const strip = document.getElementById('layerStrip');
     if (!strip) return;
@@ -429,6 +481,8 @@ function renderLayerStrip() {
         card.className = 'layer-card'
             + (isActive ? ' active-layer-card' : '')
             + (layer.enabled ? '' : ' layer-card-off');
+        card.draggable = true;
+        card.dataset.idx = i;
 
         const typeIcon = layer.type === 'animation' ? '🎬' : '✏️';
         const meta     = layer.type === 'animation' ? `${layer.frames?.length || 0}f` : 'static';
@@ -453,6 +507,39 @@ function renderLayerStrip() {
                     onclick="event.stopPropagation()">
                 <span>${layer.opacity}%</span>
             </div>`;
+
+        // Prevent drag when using the opacity slider
+        const slider = card.querySelector('input[type=range]');
+        if (slider) {
+            slider.addEventListener('mousedown', e => { e.stopPropagation(); card.draggable = false; });
+            slider.addEventListener('mouseup',   () => { card.draggable = true; });
+        }
+
+        // Drag-drop handlers
+        card.addEventListener('dragstart', e => {
+            _dragSrcLayerIdx = i;
+            card.classList.add('layer-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        card.addEventListener('dragend', () => {
+            card.classList.remove('layer-dragging');
+            strip.querySelectorAll('.layer-card').forEach(c => c.classList.remove('layer-drag-over'));
+        });
+        card.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            strip.querySelectorAll('.layer-card').forEach(c => c.classList.remove('layer-drag-over'));
+            if (_dragSrcLayerIdx !== i) card.classList.add('layer-drag-over');
+        });
+        card.addEventListener('drop', e => {
+            e.preventDefault();
+            if (_dragSrcLayerIdx === null || _dragSrcLayerIdx === i) return;
+            const moved = layers.splice(_dragSrcLayerIdx, 1)[0];
+            layers.splice(i, 0, moved);
+            _dragSrcLayerIdx = null;
+            renderLayerStrip();
+            _refreshKeyboard();
+        });
 
         card.addEventListener('click', () => selectLayer(layer.id));
         strip.appendChild(card);
@@ -549,6 +636,11 @@ let _savedActiveAnimFrame = -1;
 
 function _mountLayerAnimEditor(layer) {
     if (_layerAnimActive) _unmountLayerAnimEditor();
+
+    // Only stop this layer's ticker — editor controls it now.
+    // All other layer tickers keep running if preview is active.
+    _stopLayerAnim(layer);
+
     _layerAnimActive = true;
     _savedAnimFrames = animFrames;
     _savedActiveAnimFrame = activeAnimFrame;
@@ -582,26 +674,31 @@ function _mountLayerAnimEditor(layer) {
     if (mainLoop)  mainLoop.checked  = loopVal;
 }
 
-function _unmountLayerAnimEditor() {
+function _unmountLayerAnimEditor(fullyStop = false) {
     if (!_layerAnimActive) return;
-    stopPreview();
-    // Stop streaming — user must re-click Apply or Preview to restart
-    if (typeof applyLayersActive !== 'undefined') {
-        applyLayersActive = false;
-        if (typeof _syncAllPlayBtns === 'function') _syncAllPlayBtns(false);
+
+    if (fullyStop) {
+        _stopAllPlayback();
     }
+
+    // Save editor state back into the layer
     const layer = getActiveLayer();
     if (layer && layer.type === 'animation') {
         layer._frameIdx = activeAnimFrame;
         layer.frames = animFrames;
         const layerLoop = document.getElementById('layerLoopAnim');
         if (layerLoop) layer.loop = layerLoop.checked;
-        if (applyLayersActive) _startLayerAnim(layer);
     }
+
     _layerAnimActive = false;
     animFrames = _savedAnimFrames;
     activeAnimFrame = _savedActiveAnimFrame;
     _savedAnimFrames = null;
+
+    // Restart ALL layer tickers at their current positions if still playing
+    if (applyLayersActive || (typeof isPlaying !== 'undefined' && isPlaying)) {
+        _resumeAllLayerAnims();
+    }
 
     document.getElementById('timelineWrap').style.display = 'none';
     document.getElementById('animLeft').style.display = 'none';
@@ -673,8 +770,7 @@ function closeLayersPanel() {
     layersPanelOpen = false;
     activeMode = modes.static;
 
-    // Unmount anim editor FIRST before overwriting display states
-    if (_layerAnimActive) _unmountLayerAnimEditor();
+    if (_layerAnimActive) _unmountLayerAnimEditor(true);
 
     document.getElementById('staticLeft').style.display  = 'block';
     document.getElementById('animLeft').style.display    = 'none';
@@ -695,7 +791,7 @@ function closeLayersPanel() {
     deactivateEraser();
     restoreMainKeyboard();
     stopCompositor();
-    applyLayersActive = false;
+    _stopAllPlayback();
     if (typeof startStaticStream === 'function') startStaticStream();
 }
 
@@ -782,13 +878,15 @@ function renderLayerPresetList() {
 }
 
 function _loadLayerPreset(preset) {
-    if (_layerAnimActive) _unmountLayerAnimEditor();
+    _stopAllPlayback();
+    if (_layerAnimActive) _unmountLayerAnimEditor(true);
     _deserializeLayers(preset.layers);
     renderLayerStrip();
     _refreshKeyboard();
     // Mount anim editor if active layer is animation
     const active = getActiveLayer();
     if (active && active.type === 'animation') _mountLayerAnimEditor(active);
+    _syncLayerAnimControls();
     toast(`Loaded "${preset.name}"`);
 }
 

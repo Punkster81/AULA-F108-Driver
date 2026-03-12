@@ -224,10 +224,21 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
+    def save_current_layers(self, layers_data):
+        """Overwrite lighting/current.json with the latest layer stack state."""
+        try:
+            data = {'type': 'layers', 'layers': layers_data}
+            with open(os.path.join(lighting_dir(), 'current.json'), 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
     def load_current_lighting(self):
         """
         Read lighting/current.json and return the last-used state.
-        Returns {ok, type, colors} for static, or {ok, type, animation} for animation.
+        Returns {ok, type, colors} for static, {ok, type, animation} for animation,
+        or {ok, type, layers} for a layer stack.
         """
         try:
             path = os.path.join(lighting_dir(), 'current.json')
@@ -235,6 +246,8 @@ class AnimationAPI:
                 return {'ok': False, 'reason': 'no_current'}
             with open(path, 'r', encoding='utf-8') as f:
                 current = json.load(f)
+            if current.get('type') == 'layers':
+                return {'ok': True, 'type': 'layers', 'layers': current.get('layers', [])}
             if current.get('type') == 'animation':
                 anim_path = current.get('file', '')
                 if not os.path.exists(anim_path):

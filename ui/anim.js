@@ -95,6 +95,8 @@ function copyFromMain() {
 }
 
 // ── Timeline rendering ────────────────────────────────────────────────────────
+let _dragSrcFrameIdx = null;
+
 function renderTimeline() {
     const tl = document.getElementById('animTimeline');
     tl.innerHTML = '';
@@ -102,8 +104,37 @@ function renderTimeline() {
         const thumb = document.createElement('div');
         thumb.className = 'frame-thumb' + (i === activeAnimFrame ? ' active-frame' : '');
         thumb.dataset.frameIdx = i;
+        thumb.draggable = true;
         thumb.innerHTML = `<div class="frame-preview" id="fp-${i}"></div><div class="frame-duration">${frame.duration}ms</div>`;
         thumb.onclick = () => selectAnimFrame(i);
+
+        // Drag-drop handlers
+        thumb.addEventListener('dragstart', e => {
+            _dragSrcFrameIdx = i;
+            thumb.classList.add('frame-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        thumb.addEventListener('dragend', () => {
+            thumb.classList.remove('frame-dragging');
+            tl.querySelectorAll('.frame-thumb').forEach(t => t.classList.remove('frame-drag-over'));
+        });
+        thumb.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            tl.querySelectorAll('.frame-thumb').forEach(t => t.classList.remove('frame-drag-over'));
+            if (_dragSrcFrameIdx !== i) thumb.classList.add('frame-drag-over');
+        });
+        thumb.addEventListener('drop', e => {
+            e.preventDefault();
+            if (_dragSrcFrameIdx === null || _dragSrcFrameIdx === i) return;
+            const moved = animFrames.splice(_dragSrcFrameIdx, 1)[0];
+            animFrames.splice(i, 0, moved);
+            activeAnimFrame = i; // follow the dropped frame
+            _dragSrcFrameIdx = null;
+            renderTimeline();
+            loadFrameIntoMain(activeAnimFrame);
+        });
+
         tl.appendChild(thumb);
         renderFramePreview(i);
     });
@@ -188,18 +219,16 @@ function updateTotalDuration() {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 function togglePreview() {
-    // In composite layers view with no active anim editor:
-    // preview = toggle the hardware streaming (applyLayersActive)
-    const inLayersComposite = typeof layersPanelOpen !== 'undefined' && layersPanelOpen
-        && typeof layerViewMode !== 'undefined' && layerViewMode === 'composite'
-        && !(typeof _layerAnimActive !== 'undefined' && _layerAnimActive);
-    if (inLayersComposite) {
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        // Layers mode: single unified toggle — applyLayersActive controls everything
         applyLayersActive = !applyLayersActive;
         _syncAllPlayBtns(applyLayersActive);
         if (applyLayersActive) {
             _startAllLayerAnims();
+            isPlaying = true;
+            playNextFrame();
         } else {
-            _stopAllLayerAnims();
+            if (typeof _stopAllPlayback === 'function') _stopAllPlayback();
             if (typeof _sendStaticSnapshot === 'function') _sendStaticSnapshot();
         }
         return;
@@ -228,8 +257,12 @@ function startPreview() {
     if (animFrames.length === 0) { toast('No frames to preview'); return; }
     isPlaying = true; previewFrameIdx = 0;
     _syncAllPlayBtns(true);
-    // Pause compositor while single-layer preview runs to avoid fighting
-    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) stopCompositor();
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        // Keep compositor running so screen animates — tickers drive _frameIdx
+        if (typeof _startAllLayerAnims === 'function') _startAllLayerAnims();
+    } else {
+        // Normal anim mode — compositor not running, preview loop owns the screen
+    }
     playNextFrame();
 }
 
@@ -237,16 +270,32 @@ function stopPreview() {
     isPlaying = false; clearTimeout(previewTimer);
     _syncAllPlayBtns(false);
     document.getElementById('playStatus').textContent = 'Stopped';
-    if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
-    // Restart compositor, send static snapshot
     if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
-        startCompositor();
+        if (!(typeof applyLayersActive !== 'undefined' && applyLayersActive)) {
+            if (typeof _stopAllLayerAnims === 'function') _stopAllLayerAnims();
+        }
         if (typeof _sendStaticSnapshot === 'function') _sendStaticSnapshot();
+    } else {
+        if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
     }
 }
 
 function playNextFrame() {
     if (!isPlaying) return;
+
+    // In layers mode: tickers + compositor handle screen. This loop only sends hardware.
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        if (typeof compositeLayers === 'function' && window.pywebview?.api) {
+            const merged = compositeLayers();
+            const payload = {};
+            Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+            window.pywebview.api.apply_frame(payload);
+        }
+        previewTimer = setTimeout(playNextFrame, 35);
+        return;
+    }
+
+    // Normal anim mode — frame-accurate playback drives screen + hardware
     if (previewFrameIdx >= animFrames.length) {
         if (_getLoopChecked()) previewFrameIdx = 0;
         else { stopPreview(); return; }
@@ -254,23 +303,9 @@ function playNextFrame() {
     const frame = animFrames[previewFrameIdx];
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
     loadFrameIntoMain(previewFrameIdx);
-
-    // Sync layer._frameIdx so compositor reads the right frame
-    if (typeof _layerAnimActive !== 'undefined' && _layerAnimActive) {
-        const layer = typeof getActiveLayer === 'function' ? getActiveLayer() : null;
-        if (layer) layer._frameIdx = previewFrameIdx;
-    }
-
     if (window.pywebview?.api) {
-        let payload = {};
-        if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen
-            && typeof compositeLayers === 'function') {
-            // Send full composite so all layers (static + animated) appear on hardware
-            const merged = compositeLayers();
-            Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
-        } else {
-            Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
-        }
+        const payload = {};
+        Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
         window.pywebview.api.apply_frame(payload);
     }
     previewFrameIdx++;

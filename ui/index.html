@@ -414,6 +414,10 @@
                 _sendStaticSnapshot();
                 toast('⚡ Layers applied to keyboard (static)');
             }
+            // Save layer stack as current so it restores on next launch
+            if (hasPyAPI()) {
+                window.pywebview.api.save_current_layers(_serializeLayers());
+            }
         }
     </script>
 
