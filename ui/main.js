@@ -175,6 +175,29 @@ document.addEventListener('mouseup', () => { painting = false; });
 // ── Input modes ───────────────────────────────────────────────────────────────
 let paintMode      = false;
 let eyedropperMode = false;
+let _paintModeBeforeEyedrop = false;
+
+// ── Continuous stream for static & anim modes ─────────────────────────────────
+let _staticStreamTimer = null;
+const STATIC_STREAM_MS = 80; // ~12fps, light enough not to hammer the HID
+
+function startStaticStream() {
+    if (_staticStreamTimer) return;
+    _staticStreamTick();
+}
+function stopStaticStream() {
+    clearTimeout(_staticStreamTimer);
+    _staticStreamTimer = null;
+}
+function _staticStreamTick() {
+    // Only run when NOT in layers mode (compositor handles that)
+    if (typeof layersPanelOpen === 'undefined' || !layersPanelOpen) {
+        if (hasPyAPI()) {
+            window.pywebview.api.apply_frame(buildPayload());
+        }
+    }
+    _staticStreamTimer = setTimeout(_staticStreamTick, STATIC_STREAM_MS);
+}
 
 function setPaintMode(on) {
     paintMode = on; eyedropperMode = false;
@@ -197,6 +220,7 @@ function setPaintMode(on) {
 function toggleEyedropper() {
     eyedropperMode = !eyedropperMode;
     if (eyedropperMode) {
+        _paintModeBeforeEyedrop = paintMode;
         paintMode = false;
         document.getElementById('selectModeBtn').classList.remove('active-mode');
         document.getElementById('paintModeBtn').classList.remove('active-mode');
@@ -205,7 +229,8 @@ function toggleEyedropper() {
     } else {
         document.querySelectorAll('.eyedropper-btn').forEach(b => b.classList.remove('active-mode'));
         document.getElementById('keyboard').style.cursor = '';
-        document.getElementById('selectModeBtn').classList.add('active-mode');
+        // Restore whichever mode was active before eyedropper
+        setPaintMode(_paintModeBeforeEyedrop);
     }
 }
 
@@ -349,6 +374,7 @@ async function connectKeyboard() {
         status.textContent = r.message;
         dot.style.background = '#2ecc71'; dot.style.boxShadow = '0 0 8px #2ecc71';
         toast('Connected!');
+        startStaticStream();
         await restoreLastLighting();
     } else {
         status.textContent = r.message;

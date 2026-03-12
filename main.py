@@ -176,6 +176,16 @@ def colors_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
+def layers_dir():
+    """Returns (and creates if needed) the 'layers' folder next to main.py / the exe."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, 'layers')
+    os.makedirs(d, exist_ok=True)
+    return d
+
 class AnimationAPI:
     def save_current_animation(self, data):
         """Save animation as current_animation.json and also write current.json pointer."""
@@ -339,6 +349,58 @@ class AnimationAPI:
         """Delete <app_dir>/animations/<filename>. Returns {ok}."""
         try:
             path = os.path.join(animations_dir(), os.path.basename(filename))
+            if os.path.exists(path):
+                os.remove(path)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    # ── Layer presets ──────────────────────────────────────────────────────────
+    def save_layer_preset(self, name, data):
+        """
+        Save a layer stack to layers/<name>.json.
+        data: { name, version, layers: [ {name, type, opacity, enabled, colors?, frames?, loop?} ] }
+        Each layer is self-contained — static layers embed colors, anim layers embed frames.
+        """
+        try:
+            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'layers'
+            fname = safe.replace(' ', '_').lower() + '.json'
+            data['name'] = name
+            data['version'] = 1
+            path = os.path.join(layers_dir(), fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def list_layer_presets(self):
+        """List all saved layer preset files."""
+        try:
+            results = []
+            d = layers_dir()
+            for fname in sorted(os.listdir(d)):
+                if not fname.lower().endswith('.json'):
+                    continue
+                try:
+                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    results.append({
+                        'filename': fname,
+                        'name': data.get('name', fname),
+                        'layer_count': len(data.get('layers', [])),
+                        'layers': data.get('layers', []),
+                    })
+                except Exception:
+                    pass
+            return {'ok': True, 'presets': results}
+        except Exception as e:
+            return {'ok': False, 'presets': [], 'message': str(e)}
+
+    def delete_layer_preset(self, filename):
+        """Delete a layer preset file."""
+        try:
+            path = os.path.join(layers_dir(), os.path.basename(filename))
             if os.path.exists(path):
                 os.remove(path)
             return {'ok': True}

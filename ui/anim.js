@@ -38,6 +38,11 @@ function selectAnimFrame(idx) {
     document.querySelectorAll('.frame-thumb').forEach((el, i) => {
         el.classList.toggle('active-frame', i === idx);
     });
+    // If we're editing a layer animation, keep layer._frameIdx in sync
+    if (typeof _layerAnimActive !== 'undefined' && _layerAnimActive) {
+        const layer = typeof getActiveLayer === 'function' ? getActiveLayer() : null;
+        if (layer) layer._frameIdx = idx;
+    }
 }
 
 function updateFrameDuration() {
@@ -177,33 +182,81 @@ function updateTotalDuration() {
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
-function togglePreview() { isPlaying ? stopPreview() : startPreview(); }
+function togglePreview() {
+    // In composite layers view with no active anim editor:
+    // preview = toggle the hardware streaming (applyLayersActive)
+    const inLayersComposite = typeof layersPanelOpen !== 'undefined' && layersPanelOpen
+        && typeof layerViewMode !== 'undefined' && layerViewMode === 'composite'
+        && !(typeof _layerAnimActive !== 'undefined' && _layerAnimActive);
+    if (inLayersComposite) {
+        applyLayersActive = !applyLayersActive;
+        _syncAllPlayBtns(applyLayersActive);
+        if (applyLayersActive) {
+            _startAllLayerAnims();
+        } else {
+            _stopAllLayerAnims();
+            if (typeof _sendStaticSnapshot === 'function') _sendStaticSnapshot();
+        }
+        return;
+    }
+    isPlaying ? stopPreview() : startPreview();
+}
+
+function _getLoopChecked() {
+    // In layers mode read layerLoopAnim, otherwise read loopAnim
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        return document.getElementById('layerLoopAnim')?.checked ?? true;
+    }
+    return document.getElementById('loopAnim')?.checked ?? true;
+}
+
+function _syncAllPlayBtns(playing) {
+    ['playBtn', 'layerPlayBtn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.textContent = playing ? '■ STOP' : '▶ PREVIEW';
+        btn.classList.toggle('playing', playing);
+    });
+}
 
 function startPreview() {
     if (animFrames.length === 0) { toast('No frames to preview'); return; }
     isPlaying = true; previewFrameIdx = 0;
-    document.getElementById('playBtn').textContent = '■ STOP';
-    document.getElementById('playBtn').classList.add('playing');
+    _syncAllPlayBtns(true);
+    // Pause compositor while single-layer preview runs to avoid fighting
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) stopCompositor();
     playNextFrame();
 }
 
 function stopPreview() {
     isPlaying = false; clearTimeout(previewTimer);
-    document.getElementById('playBtn').textContent = '▶ PREVIEW';
-    document.getElementById('playBtn').classList.remove('playing');
+    _syncAllPlayBtns(false);
     document.getElementById('playStatus').textContent = 'Stopped';
     if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
+    // Restart compositor, send static snapshot
+    if (typeof layersPanelOpen !== 'undefined' && layersPanelOpen) {
+        startCompositor();
+        if (typeof _sendStaticSnapshot === 'function') _sendStaticSnapshot();
+    }
 }
 
 function playNextFrame() {
     if (!isPlaying) return;
     if (previewFrameIdx >= animFrames.length) {
-        if (document.getElementById('loopAnim').checked) previewFrameIdx = 0;
+        if (_getLoopChecked()) previewFrameIdx = 0;
         else { stopPreview(); return; }
     }
     const frame = animFrames[previewFrameIdx];
     document.getElementById('playStatus').textContent = `Frame ${previewFrameIdx + 1}/${animFrames.length}`;
     loadFrameIntoMain(previewFrameIdx);
+
+    // If previewing a layer animation, keep layer._frameIdx in sync so the
+    // compositor reads the correct frame instead of fighting the preview
+    if (typeof _layerAnimActive !== 'undefined' && _layerAnimActive) {
+        const layer = typeof getActiveLayer === 'function' ? getActiveLayer() : null;
+        if (layer) layer._frameIdx = previewFrameIdx;
+    }
+
     if (window.pywebview?.api) {
         const payload = {};
         Object.entries(frame.colors || {}).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
@@ -213,7 +266,32 @@ function playNextFrame() {
     previewTimer = setTimeout(playNextFrame, frame.duration);
 }
 
-// ── Active animation ──────────────────────────────────────────────────────────
+// ── Anim frame stream — pushes the active frame continuously while editing ────
+let _animFrameStreamTimer = null;
+const ANIM_FRAME_STREAM_MS = 80;
+
+function startAnimFrameStream() {
+    if (_animFrameStreamTimer) return;
+    _animFrameStreamTick();
+}
+function stopAnimFrameStream() {
+    clearTimeout(_animFrameStreamTimer);
+    _animFrameStreamTimer = null;
+}
+function _animFrameStreamTick() {
+    // Don't override preview or active anim playback
+    if (!isPlaying && !isActiveAnim && activeAnimFrame >= 0 && window.pywebview?.api) {
+        const frame = animFrames[activeAnimFrame];
+        if (frame) {
+            const payload = {};
+            Object.entries(frame.colors || {}).forEach(([idx, {r,g,b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+            window.pywebview.api.apply_frame(payload);
+        }
+    }
+    _animFrameStreamTimer = setTimeout(_animFrameStreamTick, ANIM_FRAME_STREAM_MS);
+}
+
+
 let activeAnimTimer = null, activeAnimFrameIdx = 0, isActiveAnim = false;
 
 async function setAsActiveAnimation() {
@@ -346,7 +424,7 @@ function renderSavedList() {
 // ── Mode toggle ───────────────────────────────────────────────────────────────
 function openAnimPanel() {
     activeMode = modes.animation;
-    setPaintMode(true);
+    if (typeof stopStaticStream === 'function') stopStaticStream();
     document.getElementById('staticLeft').style.display   = 'none';
     document.getElementById('animLeft').style.display     = 'block';
     document.getElementById('timelineWrap').style.display = 'block';
@@ -354,18 +432,19 @@ function openAnimPanel() {
     document.getElementById('animHint').style.display     = 'block';
     document.getElementById('staticRight').style.display  = 'none';
     document.getElementById('animRight').style.display    = 'flex';
-    const btn = document.getElementById('animToggleBtn');
-    if (btn) { btn.textContent = '✕ EXIT ANIMATIONS'; btn.style.cssText = 'border-color:#ff4444;color:#ff4444'; }
     if (activeAnimFrame >= 0) loadFrameIntoMain(activeAnimFrame);
     else Object.keys(keyEls).forEach(idx => paintKey(idx, 0, 0, 0));
+    renderTimeline();
+    updateAnimFrameCount();
     loadAnimationsFromDisk();
+    startAnimFrameStream();
 }
 
 function closeAnimPanel() {
     activeMode = modes.static;
-    setPaintMode(false);
     stopPreview();
     stopActiveAnim();
+    stopAnimFrameStream();
     document.getElementById('staticLeft').style.display   = 'block';
     document.getElementById('animLeft').style.display     = 'none';
     document.getElementById('timelineWrap').style.display = 'none';
@@ -373,24 +452,13 @@ function closeAnimPanel() {
     document.getElementById('animHint').style.display     = 'none';
     document.getElementById('staticRight').style.display  = 'block';
     document.getElementById('animRight').style.display    = 'none';
-    const btn = document.getElementById('animToggleBtn');
-    if (btn) { btn.textContent = '🎬 ANIMATIONS'; btn.style.cssText = 'border-color:var(--accent2);color:var(--accent2)'; }
     restoreMainKeyboard();
+    if (typeof startStaticStream === 'function') startStaticStream();
 }
 
 function toggleAnimPanel() { activeMode === modes.animation ? closeAnimPanel() : openAnimPanel(); }
 
-// Inject toolbar button
-(function injectAnimBtn() {
-    const toolbar = document.querySelector('.kb-toolbar');
-    if (!toolbar) { setTimeout(injectAnimBtn, 50); return; }
-    const btn = document.createElement('button');
-    btn.id = 'animToggleBtn'; btn.className = 'tb-btn';
-    btn.style.cssText = 'border-color:var(--accent2);color:var(--accent2)';
-    btn.textContent = '🎬 ANIMATIONS';
-    btn.onclick = toggleAnimPanel;
-    toolbar.insertBefore(btn, toolbar.querySelector('.selection-info'));
-})();
+// Button is now in HTML as part of the 3-way mode group — no injection needed.
 
 // Start with one empty frame
 addFrame();

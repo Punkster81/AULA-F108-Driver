@@ -16,6 +16,7 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 - Save colors to onboard flash (persists after power cycle)
 - Custom animation editor with frame timeline
 - Save/load animations as JSON
+- Layer system — stack static and animated layers with per-layer opacity and transparency
 - Native desktop app (PyWebView — no browser needed)
 
 ## Hardware
@@ -59,9 +60,11 @@ aula-f108-driver/
 │   ├── index.html            # App UI
 │   ├── main.css              # Main styles
 │   ├── anim.css              # Animation editor styles
+│   ├── layers.css            # Layer system styles
 │   ├── layout.js             # Keyboard layout data (ROWS, NAV, NUMPAD)
 │   ├── main.js               # Main UI logic
-│   └── anim.js               # Animation editor logic
+│   ├── anim.js               # Animation editor logic
+│   └── layers.js             # Layer system logic
 └── .github/
     └── workflows/
         └── build.yml         # Auto-builds exe on release tag
@@ -74,6 +77,19 @@ pip install pyinstaller
 pyinstaller --onefile --windowed --add-data "ui;ui" --name aula_driver main.py
 # Output: dist/aula_driver.exe
 ```
+
+---
+
+## Layer system
+
+The layer system lets you stack multiple lighting layers on top of each other, composited in real time.
+
+- **Static layers** — per-key colors painted directly onto the layer
+- **Animation layers** — full frame-timeline animations running independently per layer
+- **Opacity** — each layer has a 0–100% opacity slider for blending
+- **Transparency** — keys with no color set on a layer are transparent; the layer below shows through. Black (`0,0,0`) counts as a real color — use the Eraser tool to make a key transparent
+- **View modes** — toggle between editing a single layer in isolation or previewing the full composite
+- **Three editing modes** in the toolbar: ✏️ Static, 🎬 Animations, ⚡ Layers
 
 ---
 
@@ -133,7 +149,7 @@ PRs welcome. Key areas that would benefit from contributions:
 
 - Capture and reverse-engineer built-in effect commands (breathing, wave, ripple)
 - macOS / Linux support investigation
-- Startup with Windows / autorun option
+- Keypress-reactive lighting effects
 
 ## License
 
