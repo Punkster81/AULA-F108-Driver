@@ -319,3 +319,20 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
+
+/* ── Reactive effect cards ── */
+#reactiveEffectList .frame-thumb {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    transition: border-color 0.15s, background 0.15s;
+}
+#reactiveEffectList .frame-thumb:hover {
+    border-color: var(--muted);
+    background: var(--hover);
+}
+#reactiveEffectList .frame-thumb.active-frame {
+    border-color: var(--accent);
+    background: rgba(99,179,237,0.08);
+    box-shadow: 0 0 8px rgba(99,179,237,0.15);
+}

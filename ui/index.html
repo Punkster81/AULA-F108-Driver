@@ -120,6 +120,7 @@
                 <div class="layer-type-group" id="layerTypeBtns">
                     <button class="layer-type-btn active-mode" data-type="static" onclick="setActiveLayerType('static')">✏️ STATIC</button>
                     <button class="layer-type-btn" data-type="animation" onclick="setActiveLayerType('animation')">🎬 ANIM</button>
+                    <button class="layer-type-btn" data-type="reactive" onclick="setActiveLayerType('reactive')">⚡ REACTIVE</button>
                 </div>
                 <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Preview</div>
                 <div class="layer-type-group">
@@ -129,6 +130,9 @@
                 <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.6">
                     ACTIVE — edit view<br>ALL LAYERS — composite preview
                 </div>
+
+                <!-- Reactive layer settings moved to bottom strip -->
+
                 <div style="margin-top:12px">
                     <button class="tb-btn danger" style="width:100%" onclick="clearAllLayers()">✕ CLEAR ALL LAYERS</button>
                 </div>
@@ -201,6 +205,15 @@
                 <div class="layer-strip" id="layerStrip"></div>
             </div>
 
+            <!-- Reactive effect selector (shown when a reactive layer is active) -->
+            <div id="reactiveStripWrap" style="display:none;border-top:1px solid var(--border)">
+                <div class="timeline-label">
+                    <span>⚡ REACTIVE EFFECT</span>
+                </div>
+                <div class="timeline" id="reactiveEffectList"></div>
+                <div id="reactiveEffectSettings" style="padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center;min-height:44px"></div>
+            </div>
+
             <div id="staticHint" style="font-size:0.62rem;color:var(--dim);line-height:1.8">
                 <b style="color:var(--muted)">CLICK</b> key to select &nbsp;·&nbsp;
                 <b style="color:var(--muted)">DRAG</b> to paint &nbsp;·&nbsp;
@@ -223,7 +236,7 @@
                 <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
                 <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
                     <b style="color:var(--muted)">APPLY</b> streams colors live<br>
-                    <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle (~2s)
+                    <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle
                 </div>
 
                 <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Save Preset</div>
@@ -401,20 +414,20 @@
 
         function pushLayersToKeyboard() {
             setLayerViewMode('composite');
-            const hasAnim = layers.some(l => l.type === 'animation' && l.enabled);
-            if (hasAnim) {
+            const needsStream = layers.some(l => l.enabled && (l.type === 'animation' || l.type === 'reactive'));
+            if (needsStream) {
                 applyLayersActive = true;
                 _startAllLayerAnims();
                 stopCompositor();
                 startCompositor();
                 _syncAllPlayBtns(true);
-                toast('⚡ Layers streaming to keyboard (animated)');
+                _syncReactiveConfig();
+                toast('⚡ Layers streaming to keyboard');
             } else {
                 applyLayersActive = false;
                 _sendStaticSnapshot();
                 toast('⚡ Layers applied to keyboard (static)');
             }
-            // Save layer stack as current so it restores on next launch
             if (hasPyAPI()) {
                 window.pywebview.api.save_current_layers(_serializeLayers());
             }

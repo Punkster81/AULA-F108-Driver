@@ -457,10 +457,10 @@ import time as _time
 
 class ReactiveKeyState:
     def __init__(self):
-        self._lock       = threading.Lock()
-        self._held       = set()
-        self._events     = []
-        self._running    = False
+        self._lock    = threading.Lock()
+        self._held    = set()
+        self._events  = []
+        self._running = False
 
     def start(self):
         if self._running:
@@ -471,6 +471,12 @@ class ReactiveKeyState:
 
     def stop(self):
         self._running = False
+        # Post WM_QUIT to unblock the GetMessageW pump
+        try:
+            import ctypes
+            ctypes.WinDLL('user32').PostQuitMessage(0)
+        except Exception:
+            pass
 
     def _run(self):
         import ctypes
@@ -495,9 +501,9 @@ class ReactiveKeyState:
         user32 = ctypes.WinDLL('user32', use_last_error=True)
 
         NUMPAD_NUMLOCK_OFF = {
-            35: '58',  # End   → Num1
+            35: '56',  # End   → Num1
             40: '57',  # Down  → Num2
-            34: '56',  # PgDn  → Num3
+            34: '58',  # PgDn  → Num3
             37: '44',  # Left  → Num4
             12: '45',  # Clear → Num5
             39: '46',  # Right → Num6
@@ -544,37 +550,47 @@ class ReactiveKeyState:
                 if led:
                     is_down = wParam in (WM_KEYDOWN, WM_SYSKEYDOWN)
                     is_up   = wParam in (WM_KEYUP,   WM_SYSKEYUP)
-                    if is_down:
+                    if is_down or is_up:
                         with self._lock:
-                            self._held.add(led)
-                            self._events.append((led, 'press', _time.time()))
-                            if len(self._events) > 256:
-                                self._events = self._events[-256:]
-                    elif is_up:
-                        with self._lock:
-                            self._held.discard(led)
-                            self._events.append((led, 'release', _time.time()))
+                            if is_down:
+                                print(f'[reactive] press led=0x{led}', flush=True)
+                                self._held.add(led)
+                                self._events.append((led, 'press', _time.time()))
+                            else:
+                                self._held.discard(led)
+                                self._events.append((led, 'release', _time.time()))
                             if len(self._events) > 256:
                                 self._events = self._events[-256:]
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         _proc = HOOKPROC(_hook_proc)
-        _hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _proc, None, 0)
-        if not _hook:
-            print(f'[reactive] SetWindowsHookExW failed: {ctypes.get_last_error()}', flush=True)
-            return
 
-        # Message pump — required for low-level hooks to fire
-        msg = ctypes.wintypes.MSG()
-        while self._running:
-            ret = user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)
-            if ret:
+        # Hook must be installed AND pumped on the same thread.
+        # Use a blocking GetMessageW pump — never sleeps, always ready.
+        import queue as _queue
+        _ready = threading.Event()
+
+        def _pump_thread():
+            nonlocal _proc
+            h = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _proc, None, 0)
+            if not h:
+                print(f'[reactive] SetWindowsHookExW failed: {ctypes.get_last_error()}', flush=True)
+                _ready.set()
+                return
+            _ready.set()
+            # Blocking message pump — GetMessageW blocks until a message arrives
+            msg = ctypes.wintypes.MSG()
+            while self._running:
+                ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if ret == 0 or ret == -1:
+                    break
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))
-            else:
-                _time.sleep(0.001)
+            user32.UnhookWindowsHookEx(h)
 
-        user32.UnhookWindowsHookEx(_hook)
+        t = threading.Thread(target=_pump_thread, daemon=True)
+        t.start()
+        _ready.wait(timeout=2.0)  # wait for hook to be installed before returning
 
 
     def poll(self, since_ts: float):

@@ -27,12 +27,102 @@ function getActiveLayer() { return layers.find(l => l.id === activeLayerId) || n
 function getLayerSnapshot(layer) {
     if (!layer) return {};
     if (layer.type === 'static') return layer.colors || {};
+    if (layer.type === 'reactive') {
+        if (applyLayersActive || (typeof isPlaying !== 'undefined' && isPlaying)) return _getReactiveSnapshot(layer);
+        return layer.colors || {};
+    }
     const frames = layer.frames || [];
     if (!frames.length) return {};
     return frames[layer._frameIdx || 0]?.colors || {};
 }
 
-// ── Compositor ────────────────────────────────────────────────────────────────
+// ── Reactive layer engine ─────────────────────────────────────────────────────
+
+function _getReactiveSnapshot(layer) {
+    const out = {};
+    const now = performance.now();
+    Object.entries(layer._reactiveColors || {}).forEach(([idx, key]) => {
+        let alpha = key.alpha;
+        if (key.releaseTime !== null) {
+            if (layer.holdMode === 'instant') {
+                alpha = 0;
+            } else {
+                const elapsed = now - key.releaseTime;
+                alpha = Math.max(0, 1 - elapsed / (layer.fadeDuration || 500));
+            }
+        }
+        if (alpha > 0) {
+            out[idx] = {
+                r: Math.round(key.r * alpha),
+                g: Math.round(key.g * alpha),
+                b: Math.round(key.b * alpha),
+            };
+        }
+    });
+    return out;
+}
+
+function _tickReactiveLayers() {
+    const now = performance.now();
+    layers.forEach(layer => {
+        if (layer.type !== 'reactive' || !layer.enabled) return;
+        Object.keys(layer._reactiveColors).forEach(idx => {
+            const key = layer._reactiveColors[idx];
+            if (key.releaseTime === null) return;
+            let alpha;
+            if (layer.holdMode === 'instant') {
+                alpha = 0;
+            } else {
+                const elapsed = now - key.releaseTime;
+                alpha = Math.max(0, 1 - elapsed / (layer.fadeDuration || 500));
+            }
+            if (alpha <= 0) delete layer._reactiveColors[idx];
+        });
+    });
+}
+
+let _reactiveLastTs = 0;
+
+async function _pollReactiveLayers() {
+    if (!hasPyAPI()) return;
+    const hasReactive = layers.some(l => l.type === 'reactive' && l.enabled);
+    if (!hasReactive) return;
+
+    try {
+        const res = await window.pywebview.api.poll_keys(_reactiveLastTs);
+        if (!res?.ok) return;
+        _reactiveLastTs = res.ts;
+
+        const now = performance.now();
+        layers.forEach(layer => {
+            if (layer.type !== 'reactive' || !layer.enabled) return;
+            const defaultColor = layer.color;
+
+            res.events.forEach(ev => {
+                const idx = ev.led;
+                if (ev.type === 'press') {
+                    const { r, g, b } = layer.colors?.[idx] || defaultColor;
+                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null };
+                } else if (ev.type === 'release') {
+                    if (layer._reactiveColors[idx]) {
+                        layer._reactiveColors[idx].releaseTime = now;
+                    }
+                }
+            });
+
+            res.held.forEach(idx => {
+                if (!layer._reactiveColors[idx]) {
+                    const { r, g, b } = layer.colors?.[idx] || defaultColor;
+                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null };
+                }
+            });
+        });
+    } catch (e) { /* silently ignore poll errors */ }
+}
+
+async function _syncReactiveConfig() { /* no-op in JS-poll mode */ }
+
+
 function startCompositor() {
     if (compositorTimer) return;
     _compositorTick();
@@ -42,18 +132,18 @@ function stopCompositor() {
     compositorTimer = null;
 }
 function _compositorTick() {
+    _tickReactiveLayers();
+    _pollReactiveLayers(); // async, non-blocking
     if (layersPanelOpen) {
         if (layerViewMode === 'composite') {
             const merged = compositeLayers();
             _paintKeyboardFromMap(merged);
-            // Only send to hardware if apply is active (animation streaming)
             if (applyLayersActive && hasPyAPI()) {
                 const payload = {};
                 Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
                 window.pywebview.api.apply_frame(payload);
             }
         } else {
-            // Single-layer view: update screen only. Hardware gets a static snapshot via _sendStaticSnapshot().
             const layer = getActiveLayer();
             const snap = layer ? getLayerSnapshot(layer) : {};
             _paintKeyboardFromMap(snap);
@@ -118,6 +208,8 @@ function _stopAllPlayback() {
     isPlaying = false;
     clearTimeout(previewTimer);
     _stopAllLayerAnims();
+    // Clear reactive key state
+    layers.forEach(l => { if (l.type === 'reactive') l._reactiveColors = {}; });
     if (typeof _syncAllPlayBtns === 'function') _syncAllPlayBtns(false);
 }
 
@@ -190,6 +282,18 @@ function _makeLayer(type, name, data) {
     };
     if (type === 'static') {
         return { ...base, colors: _normalizeColors(data.colors || {}) };
+    }
+    if (type === 'reactive') {
+        return {
+            ...base,
+            effect:       data.effect       || 'highlight',
+            color:        data.color        || { r: 255, g: 255, b: 255 },
+            colors:       _normalizeColors(data.colors || {}), // per-key color overrides
+            holdMode:     data.holdMode     || 'fade',
+            fadeDuration: data.fadeDuration ?? 500,
+            _reactiveColors: {},
+            _pollTs: 0,
+        };
     }
     return {
         ...base,
@@ -267,6 +371,38 @@ function _syncControlsToLayer() {
     const val    = document.getElementById('layerOpacityVal');
     if (slider) { slider.value = layer?.opacity ?? 100; slider.disabled = !layer; }
     if (val)    val.textContent = (layer?.opacity ?? 100) + '%';
+
+    const isReactive = layer?.type === 'reactive';
+    const reactiveStrip = document.getElementById('reactiveStripWrap');
+    if (reactiveStrip) reactiveStrip.style.display = isReactive ? 'block' : 'none';
+    if (isReactive) renderReactiveEffectList(layer);
+}
+
+function setReactiveColor(hex) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.color = { r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) };
+    _syncReactiveConfig();
+}
+
+function setReactiveHoldMode(mode) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.holdMode = mode;
+    layer._reactiveColors = {};
+    renderReactiveEffectList(layer);
+    _syncReactiveConfig();
+}
+
+function setReactiveFadeDuration(ms) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.fadeDuration = ms;
+    ['reactiveFadeDurationVal','rsFadeDurVal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = ms + 'ms';
+    });
+    _syncReactiveConfig();
 }
 
 function setActiveLayerType(type) {
@@ -274,15 +410,20 @@ function setActiveLayerType(type) {
     if (!layer || layer.type === type) return;
     if (_layerAnimActive) _unmountLayerAnimEditor();
     _stopLayerAnim(layer);
+    layer._reactiveColors = {};
     layer.type = type;
     if (type === 'static') {
         layer.colors = JSON.parse(JSON.stringify(getLayerSnapshot(layer)));
-    } else {
+    } else if (type === 'animation') {
         layer.frames = [{ duration: 100, colors: JSON.parse(JSON.stringify(layer.colors || {})) }];
         layer._frameIdx = 0;
         layer.loop = true;
-        // Don't start ticker — only runs when streaming is active
         _mountLayerAnimEditor(layer);
+    } else if (type === 'reactive') {
+        layer.color        = layer.color        || { r: 255, g: 255, b: 255 };
+        layer.holdMode     = layer.holdMode     || 'fade';
+        layer.fadeDuration = layer.fadeDuration ?? 500;
+        layer._reactiveColors = {};
     }
     _syncControlsToLayer();
     renderLayerStrip();
@@ -338,8 +479,10 @@ function layerPaintKey(idx) {
     const { r, g, b } = getCurrentRGB();
     if (layer.type === 'static') {
         layer.colors[idx] = { r, g, b };
+    } else if (layer.type === 'reactive') {
+        if (!layer.colors) layer.colors = {};
+        layer.colors[idx] = { r, g, b };
     } else {
-        // Use activeAnimFrame when editor is mounted, otherwise layer._frameIdx
         const fi = _layerAnimActive ? activeAnimFrame : (layer._frameIdx || 0);
         const frame = layer.frames?.[fi];
         if (frame) {
@@ -365,7 +508,7 @@ modes.layers = {
     onClearAll() {
         const layer = getActiveLayer();
         if (!layer) { toast('No layer selected'); return; }
-        if (layer.type === 'static') {
+        if (layer.type === 'static' || layer.type === 'reactive') {
             layer.colors = {};
         } else {
             const fi = _layerAnimActive ? activeAnimFrame : (layer._frameIdx || 0);
@@ -379,12 +522,12 @@ modes.layers = {
         toast('Layer cleared');
     },
     onApplySelected(idxs) {
-        // Reuse layerPaintKey for each idx — it handles frame index, thumb update, and refresh
         const { r, g, b } = getCurrentRGB();
         const layer = getActiveLayer();
         if (!layer) { toast('No layer selected'); return; }
         idxs.forEach(idx => {
-            if (layer.type === 'static') {
+            if (layer.type === 'static' || layer.type === 'reactive') {
+                if (!layer.colors) layer.colors = {};
                 layer.colors[idx] = { r, g, b };
             } else {
                 const fi = _layerAnimActive ? activeAnimFrame : (layer._frameIdx || 0);
@@ -392,7 +535,6 @@ modes.layers = {
                 if (f) { if (!f.colors) f.colors = {}; f.colors[idx] = { r, g, b }; }
             }
         });
-        // Update thumb once after all keys applied
         if (layer.type === 'animation' && _layerAnimActive && typeof updateFrameThumb === 'function') {
             updateFrameThumb(activeAnimFrame);
         }
@@ -441,6 +583,14 @@ function addBlankLayer() {
     addLayer('static', name, { colors: {} });
 }
 
+function addReactiveLayer() {
+    const name = prompt('Layer name:', 'Reactive') || 'Reactive';
+    addLayer('reactive', name, {});
+    // Select the new layer and show its controls
+    const newLayer = layers[layers.length - 1];
+    if (newLayer) selectLayer(newLayer.id);
+}
+
 // ── View mode ─────────────────────────────────────────────────────────────────
 function setLayerViewMode(mode) {
     layerViewMode = mode;
@@ -484,8 +634,8 @@ function renderLayerStrip() {
         card.draggable = true;
         card.dataset.idx = i;
 
-        const typeIcon = layer.type === 'animation' ? '🎬' : '✏️';
-        const meta     = layer.type === 'animation' ? `${layer.frames?.length || 0}f` : 'static';
+        const typeIcon = layer.type === 'animation' ? '🎬' : layer.type === 'reactive' ? '⚡' : '✏️';
+        const meta     = layer.type === 'animation' ? `${layer.frames?.length || 0}f` : layer.type === 'reactive' ? 'reactive' : 'static';
 
         card.innerHTML = `
             <div class="layer-card-top">
@@ -612,7 +762,7 @@ function deactivateEraser() {
 function eraseLayerKey(idx) {
     const layer = getActiveLayer();
     if (!layer) return;
-    if (layer.type === 'static') {
+    if (layer.type === 'static' || layer.type === 'reactive') {
         delete layer.colors[idx];
     } else {
         const fi = _layerAnimActive ? activeAnimFrame : (layer._frameIdx || 0);
@@ -625,7 +775,72 @@ function eraseLayerKey(idx) {
     _refreshKeyboard();
 }
 
-// ── Layer animation editor ────────────────────────────────────────────────────
+// ── Reactive effect list ──────────────────────────────────────────────────────
+const REACTIVE_EFFECTS = [
+    { id: 'highlight', label: 'Key Highlight', icon: '💡', desc: 'Pressed key lights up' },
+    // More effects will be added here (ripple, wave, etc.)
+];
+
+function renderReactiveEffectList(layer) {
+    const el = document.getElementById('reactiveEffectList');
+    const settingsEl = document.getElementById('reactiveEffectSettings');
+    if (!el) return;
+    el.innerHTML = '';
+
+    // Effect cards
+    REACTIVE_EFFECTS.forEach(effect => {
+        const card = document.createElement('div');
+        const isActive = (layer.effect || 'highlight') === effect.id;
+        card.className = 'frame-thumb' + (isActive ? ' active-frame' : '');
+        card.style.cssText = 'min-width:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 10px;cursor:pointer;text-align:center';
+        card.innerHTML = `
+            <div style="font-size:1.2rem">${effect.icon}</div>
+            <div style="font-size:0.6rem;font-weight:600;color:var(--text)">${effect.label}</div>
+            <div style="font-size:0.55rem;color:var(--dim)">${effect.desc}</div>`;
+        card.addEventListener('click', () => {
+            layer.effect = effect.id;
+            renderReactiveEffectList(layer);
+        });
+        el.appendChild(card);
+    });
+
+    // Settings below the effect cards
+    if (!settingsEl) return;
+    settingsEl.innerHTML = '';
+    const activeEffect = layer.effect || 'highlight';
+
+    if (activeEffect === 'highlight') {
+        const fadeActive   = (layer.holdMode || 'fade') === 'fade';
+        const instantActive = (layer.holdMode || 'fade') === 'instant';
+        settingsEl.innerHTML = `
+            <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">After release:</span>
+                <button class="layer-type-btn ${fadeActive?'active-mode':''}" onclick="setReactiveHoldMode('fade')" style="font-size:0.58rem;padding:3px 8px">FADE OUT</button>
+                <button class="layer-type-btn ${instantActive?'active-mode':''}" onclick="setReactiveHoldMode('instant')" style="font-size:0.58rem;padding:3px 8px">INSTANT OFF</button>
+            </div>
+            ${fadeActive ? `
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Fade:</span>
+                <input type="range" min="50" max="3000" step="50" value="${layer.fadeDuration??500}"
+                    oninput="setReactiveFadeDuration(parseInt(this.value))"
+                    style="width:120px">
+                <span id="rsFadeDurVal" style="font-size:0.6rem;color:var(--text);min-width:38px">${layer.fadeDuration??500}ms</span>
+            </div>` : ''}
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Default color:</span>
+                <input type="color" value="${_rgbToHex(layer.color||{r:255,g:255,b:255})}"
+                    oninput="setReactiveColor(this.value)"
+                    style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
+                <span style="font-size:0.55rem;color:var(--dim)">Paint keys for per-key colors</span>
+            </div>`;
+    }
+}
+
+function _rgbToHex(c) {
+    return '#' + [c.r||0, c.g||0, c.b||0].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+
 // When an anim layer is active we redirect the global animFrames array and
 // activeAnimFrame index to point at the layer's own frames. All existing anim
 // functions (addFrame, renderTimeline, selectAnimFrame, etc.) work unchanged.
@@ -803,7 +1018,6 @@ function toggleLayersPanel() {
 let savedLayerPresets = {}; // filename → preset data
 
 function _serializeLayers() {
-    // Strip runtime-only fields (_timer, _running, id) before saving
     return layers.map(l => {
         const out = {
             name: l.name, type: l.type,
@@ -811,6 +1025,12 @@ function _serializeLayers() {
         };
         if (l.type === 'static') {
             out.colors = l.colors || {};
+        } else if (l.type === 'reactive') {
+            out.effect       = l.effect       || 'highlight';
+            out.color        = l.color        || { r: 255, g: 255, b: 255 };
+            out.colors       = l.colors       || {};
+            out.holdMode     = l.holdMode     || 'fade';
+            out.fadeDuration = l.fadeDuration ?? 500;
         } else {
             out.loop = l.loop !== false;
             out.frames = (l.frames || []).map(f => ({ duration: f.duration, colors: f.colors || {} }));
@@ -889,3 +1109,5 @@ function _loadLayerPreset(preset) {
     _syncLayerAnimControls();
     toast(`Loaded "${preset.name}"`);
 }
+
+// Button is now in HTML as part of the 3-way mode group — no injection needed.
