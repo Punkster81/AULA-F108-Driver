@@ -504,7 +504,6 @@ function closeAnimPanel() {
 
 function toggleAnimPanel() { activeMode === modes.animation ? closeAnimPanel() : openAnimPanel(); }
 
-// Button is now in HTML as part of the 3-way mode group — no injection needed.
 
 // Start with one empty frame
 addFrame();

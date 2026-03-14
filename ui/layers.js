@@ -889,5 +889,3 @@ function _loadLayerPreset(preset) {
     _syncLayerAnimControls();
     toast(`Loaded "${preset.name}"`);
 }
-
-// Button is now in HTML as part of the 3-way mode group — no injection needed.

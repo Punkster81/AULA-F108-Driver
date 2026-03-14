@@ -72,6 +72,7 @@ class KeyboardAPI:
                     self._kb.disconnect()
                 self._kb = AulaF108Pro()
                 colors = self._kb.connect()
+                _reactive_state.start()
                 if colors is not None:
                     self._kb.start()
                     return {'ok': True, 'message': 'Connected — VID:0C45 PID:800A', 'colors': colors}
@@ -419,6 +420,201 @@ class AnimationAPI:
             return {'ok': True}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
+
+    # ── Reactive key state ─────────────────────────────────────────────────────
+    def start_key_listener(self):
+        """Start the global key listener. Safe to call multiple times."""
+        try:
+            _reactive_state.start()
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def stop_key_listener(self):
+        """Stop the global key listener."""
+        try:
+            _reactive_state.stop()
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def poll_keys(self, since_ts):
+        """
+        Poll key state since the given timestamp.
+        Returns {ok, ts, held: [led_idx, ...], events: [{led, type, ts}]}
+        """
+        try:
+            return _reactive_state.poll(since_ts)
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+
+
+# Tracks currently pressed LED indices and recent press events for the JS
+# reactive layer system. Runs pynput in a daemon thread.
+
+import time as _time
+
+class ReactiveKeyState:
+    def __init__(self):
+        self._lock       = threading.Lock()
+        self._held       = set()
+        self._events     = []
+        self._running    = False
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        t = threading.Thread(target=self._run, daemon=True)
+        t.start()
+
+    def stop(self):
+        self._running = False
+
+    def _run(self):
+        import ctypes
+        import ctypes.wintypes
+
+        LLKHF_EXTENDED = 0x0001
+        WH_KEYBOARD_LL = 13
+        WM_KEYDOWN     = 0x0100
+        WM_SYSKEYDOWN  = 0x0104
+        WM_KEYUP       = 0x0101
+        WM_SYSKEYUP    = 0x0105
+
+        class KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ('vkCode',      ctypes.wintypes.DWORD),
+                ('scanCode',    ctypes.wintypes.DWORD),
+                ('flags',       ctypes.wintypes.DWORD),
+                ('time',        ctypes.wintypes.DWORD),
+                ('dwExtraInfo', ctypes.POINTER(ctypes.c_ulong)),
+            ]
+
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+
+        NUMPAD_NUMLOCK_OFF = {
+            35: '58',  # End   → Num1
+            40: '57',  # Down  → Num2
+            34: '56',  # PgDn  → Num3
+            37: '44',  # Left  → Num4
+            12: '45',  # Clear → Num5
+            39: '46',  # Right → Num6
+            36: '32',  # Home  → Num7
+            38: '33',  # Up    → Num8
+            33: '34',  # PgUp  → Num9
+            45: '68',  # Ins   → Num0
+            46: '69',  # Del   → Num.
+        }
+
+        def _is_numlock_on():
+            return bool(user32.GetKeyState(144) & 1)
+
+        def _resolve_led(vk, extended):
+            # Numpad Enter: extended=True, main Enter: extended=False
+            if vk == 13:
+                return '6a' if extended else '55'
+            # NumLock off: numpad keys report as nav-cluster VKs
+            if not _is_numlock_on() and vk in NUMPAD_NUMLOCK_OFF:
+                return NUMPAD_NUMLOCK_OFF[vk]
+            return VK_TO_LED.get(vk)
+
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int,
+                                       ctypes.wintypes.WPARAM,
+                                       ctypes.wintypes.LPARAM)
+
+        user32.CallNextHookEx.restype  = ctypes.c_long
+        user32.CallNextHookEx.argtypes = [
+            ctypes.c_void_p, ctypes.c_int,
+            ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+        ]
+        user32.SetWindowsHookExW.restype  = ctypes.c_void_p
+        user32.SetWindowsHookExW.argtypes = [
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD
+        ]
+        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+
+        def _hook_proc(nCode, wParam, lParam):
+            if nCode >= 0:
+                kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                vk       = kb.vkCode
+                extended = bool(kb.flags & LLKHF_EXTENDED)
+                led      = _resolve_led(vk, extended)
+                if led:
+                    is_down = wParam in (WM_KEYDOWN, WM_SYSKEYDOWN)
+                    is_up   = wParam in (WM_KEYUP,   WM_SYSKEYUP)
+                    if is_down:
+                        with self._lock:
+                            self._held.add(led)
+                            self._events.append((led, 'press', _time.time()))
+                            if len(self._events) > 256:
+                                self._events = self._events[-256:]
+                    elif is_up:
+                        with self._lock:
+                            self._held.discard(led)
+                            self._events.append((led, 'release', _time.time()))
+                            if len(self._events) > 256:
+                                self._events = self._events[-256:]
+            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+        _proc = HOOKPROC(_hook_proc)
+        _hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _proc, None, 0)
+        if not _hook:
+            print(f'[reactive] SetWindowsHookExW failed: {ctypes.get_last_error()}', flush=True)
+            return
+
+        # Message pump — required for low-level hooks to fire
+        msg = ctypes.wintypes.MSG()
+        while self._running:
+            ret = user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)
+            if ret:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+            else:
+                _time.sleep(0.001)
+
+        user32.UnhookWindowsHookEx(_hook)
+
+
+    def poll(self, since_ts: float):
+        """Return held keys + events since since_ts. Called by JS every frame."""
+        with self._lock:
+            now = _time.time()
+            events = [
+                {'led': e[0], 'type': e[1], 'ts': e[2]}
+                for e in self._events if e[2] >= since_ts
+            ]
+            held = list(self._held)
+        return {'ok': True, 'ts': now, 'held': held, 'events': events}
+
+
+# VK → LED index map (Windows Virtual Key codes → AULA F108 LED indices)
+VK_TO_LED = {
+    27:  '01',  112: '02',  113: '03',  114: '04',  115: '05',
+    116: '06',  117: '07',  118: '08',  119: '09',  120: '0a',
+    121: '0b',  122: '0c',  123: '0d',   44: '70',  145: '71',
+     19: '73',  192: '13',   49: '14',   50: '15',   51: '16',
+     52: '17',   53: '18',   54: '19',   55: '1a',   56: '1b',
+     57: '1c',   48: '1d',  189: '1e',  187: '1f',    8: '67',
+     45: '74',   36: '75',   33: '76',   46: '77',   35: '78',
+     34: '79',    9: '25',   81: '26',   87: '27',   69: '28',
+     82: '29',   84: '2a',   89: '2b',   85: '2c',   73: '2d',
+     79: '2e',   80: '2f',  219: '30',  221: '31',  220: '43',
+     20: '37',   65: '38',   83: '39',   68: '3a',   70: '3b',
+     71: '3c',   72: '3d',   74: '3e',   75: '3f',   76: '40',
+    186: '41',  222: '42',   13: '55',  160: '49',   90: '4a',
+     88: '4b',   67: '4c',   86: '4d',   66: '4e',   78: '4f',
+     77: '50',  188: '51',  190: '52',  191: '53',  161: '54',
+    162: '5b',   91: '5c',  164: '5d',   32: '5e',  165: '5f',
+     93: '61',  163: '62',   37: '63',   40: '64',   38: '65',
+     39: '66',  144: '20',  111: '21',  106: '22',  109: '7a',
+    107: '7b',  103: '32',  104: '33',  105: '34',  100: '44',
+    101: '45',  102: '46',   97: '56',   98: '57',   99: '58',
+     96: '68',  110: '69',
+}
+
+_reactive_state = ReactiveKeyState()
 
 
 # ── App entry point ───────────────────────────────────────────────────────────
