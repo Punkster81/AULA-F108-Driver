@@ -433,7 +433,18 @@ class Driver:
                 cfg    = layer_state['cfg']
                 active = layer_state['active']
                 effect = cfg.get('effect', 'highlight')
-                c = cfg.get('colors', {}).get(led) or cfg.get('color', {'r':255,'g':255,'b':255})
+                per_key = cfg.get('colors', {})
+                c = per_key.get(led)
+                if c is None:
+                    # No color assigned to this key — skip ripple
+                    if effect == 'ripple':
+                        if kind == 'release':
+                            for ripple in reversed(active):
+                                if ripple['origin'] == led and ripple['release_ts'] is None:
+                                    ripple['release_ts'] = now
+                                    break
+                        continue
+                    c = cfg.get('color', {'r':255,'g':255,'b':255})
                 if isinstance(c, (list, tuple)):
                     r, g, b = int(c[0]), int(c[1]), int(c[2])
                 else:

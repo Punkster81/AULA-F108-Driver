@@ -213,7 +213,19 @@ async function _pollReactiveLayers() {
                 if (!layer._ripples) layer._ripples = [];
                 res.events.forEach(ev => {
                     const idx = ev.led;
-                    const c = layer.colors?.[idx] || defaultColor;
+                    const perKey = layer.colors?.[idx];
+                    // For ripple: only fire if key has an explicit color painted
+                    if (layer.effect === 'ripple' && !perKey) {
+                        if (ev.type === 'release') {
+                            for (let i = layer._ripples.length - 1; i >= 0; i--) {
+                                if (layer._ripples[i].origin === idx && layer._ripples[i].releaseTime === null) {
+                                    layer._ripples[i].releaseTime = now; break;
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    const c = perKey || defaultColor;  // per-key or global color
                     if (ev.type === 'press') {
                         // Only add if not already held (one-per-press mode default)
                         const alreadyHeld = layer.rippleHoldMode !== 'continuous' &&
@@ -260,7 +272,7 @@ async function _syncReactiveConfig() {
             color:        l.color        || {r:255,g:255,b:255},
             colors:       l.colors       || {},
             holdMode:     l.holdMode     || 'fade',
-            fadeDuration: l.fadeDuration ?? 500,
+            fadeDuration: l.fadeDuration ?? (l.effect === 'ripple' ? 1500 : 500),
             opacity:      (l.opacity     ?? 100) / 100,
             rippleSpeed:  l.rippleSpeed  ?? 8.0,
             rippleWidth:  l.rippleWidth  ?? 1.2,
@@ -457,7 +469,7 @@ function _makeLayer(type, name, data) {
             color:        data.color        || { r: 255, g: 255, b: 255 },
             colors:       _normalizeColors(data.colors || {}),
             holdMode:     data.holdMode     || 'fade',
-            fadeDuration: data.fadeDuration ?? 500,
+            fadeDuration: data.fadeDuration ?? (data.effect === 'ripple' ? 1500 : 500),
             rippleSpeed:  data.rippleSpeed  ?? 8.0,
             rippleWidth:  data.rippleWidth  ?? 1.2,
             rippleHoldMode: data.rippleHoldMode ?? 'once',
