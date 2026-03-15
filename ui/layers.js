@@ -36,9 +36,46 @@ function getLayerSnapshot(layer) {
     return frames[layer._frameIdx || 0]?.colors || {};
 }
 
+// ── LED coordinate map (key units, matches driver.py) ─────────────────────────
+const LED_COORDS = {
+    '01':[0.50,0],'02':[2.00,0],'03':[3.00,0],'04':[4.00,0],'05':[5.00,0],
+    '06':[6.50,0],'07':[7.50,0],'08':[8.50,0],'09':[9.50,0],
+    '0a':[11.00,0],'0b':[12.00,0],'0c':[13.00,0],'0d':[14.00,0],
+    '13':[0.50,1],'14':[1.50,1],'15':[2.50,1],'16':[3.50,1],'17':[4.50,1],
+    '18':[5.50,1],'19':[6.50,1],'1a':[7.50,1],'1b':[8.50,1],
+    '1c':[9.50,1],'1d':[10.50,1],'1e':[11.50,1],'1f':[12.50,1],'67':[14.00,1],
+    '25':[0.75,2],'26':[1.50,2],'27':[2.50,2],'28':[3.50,2],'29':[4.50,2],
+    '2a':[5.50,2],'2b':[6.50,2],'2c':[7.50,2],'2d':[8.50,2],
+    '2e':[9.50,2],'2f':[10.50,2],'30':[11.50,2],'31':[12.50,2],'43':[13.75,2],
+    '37':[0.875,3],'38':[1.75,3],'39':[2.75,3],'3a':[3.75,3],'3b':[4.75,3],
+    '3c':[5.75,3],'3d':[6.75,3],'3e':[7.75,3],'3f':[8.75,3],
+    '40':[9.75,3],'41':[10.75,3],'42':[11.75,3],'55':[13.125,3],
+    '49':[1.125,4],'4a':[2.25,4],'4b':[3.25,4],'4c':[4.25,4],'4d':[5.25,4],
+    '4e':[6.25,4],'4f':[7.25,4],'50':[8.25,4],'51':[9.25,4],
+    '52':[10.25,4],'53':[11.25,4],'54':[12.625,4],
+    '5b':[0.75,5],'5c':[1.50,5],'5d':[2.25,5],'5e':[6.00,5],
+    '5f':[9.75,5],'60':[10.75,5],'61':[11.75,5],'62':[12.75,5],
+    '70':[16.5,0],'71':[17.5,0],'73':[18.5,0],
+    '74':[16.5,1],'75':[17.5,1],'76':[18.5,1],
+    '77':[16.5,2],'78':[17.5,2],'79':[18.5,2],
+    '65':[17.5,4],'63':[16.5,5],'64':[17.5,5],'66':[18.5,5],
+    '20':[20.0,1],'21':[21.0,1],'22':[22.0,1],'7a':[23.0,1],
+    '32':[20.0,2],'33':[21.0,2],'34':[22.0,2],'7b':[23.0,2],
+    '44':[20.0,3],'45':[21.0,3],'46':[22.0,3],
+    '56':[20.0,4],'57':[21.0,4],'58':[22.0,4],'6a':[23.0,4],
+    '68':[20.5,5],'69':[22.0,5],
+};
+
+function _ledDist(a, b) {
+    const ca = LED_COORDS[a], cb = LED_COORDS[b];
+    if (!ca || !cb) return 999;
+    return Math.sqrt((ca[0]-cb[0])**2 + (ca[1]-cb[1])**2);
+}
+
 // ── Reactive layer engine ─────────────────────────────────────────────────────
 
 function _getReactiveSnapshot(layer) {
+    if (layer.effect === 'ripple') return _getRippleSnapshot(layer);
     const out = {};
     const now = performance.now();
     Object.entries(layer._reactiveColors || {}).forEach(([idx, key]) => {
@@ -62,27 +99,69 @@ function _getReactiveSnapshot(layer) {
     return out;
 }
 
+function _getRippleSnapshot(layer) {
+    const out = {};
+    const now = performance.now();
+    const speed = (layer.rippleSpeed ?? 8.0) / 1000; // key-units per ms
+    const width = layer.rippleWidth ?? 1.2;
+    const fadeMs = layer.fadeDuration ?? 1500;
+    const c = layer.color || {r:255,g:255,b:255};
+
+    (layer._ripples || []).forEach(ripple => {
+        const elapsed = now - ripple.pressTime;
+        const ringR = elapsed * speed;
+        let fadeAlpha = 1;
+        if (ripple.releaseTime !== null) {
+            fadeAlpha = Math.max(0, 1 - (now - ripple.releaseTime) / fadeMs);
+            if (fadeAlpha <= 0) return;
+        }
+        Object.keys(LED_COORDS).forEach(idx => {
+            const dist = _ledDist(ripple.origin, idx);
+            const diff = Math.abs(dist - ringR);
+            if (diff > width * 2) return;
+            const ringAlpha = Math.max(0, 1 - diff / width) * fadeAlpha;
+            if (ringAlpha <= 0) return;
+            const rc = ripple.color || c;
+            const cur = out[idx] || {r:0,g:0,b:0};
+            out[idx] = {
+                r: Math.min(255, Math.round(rc.r * ringAlpha + cur.r * (1 - ringAlpha))),
+                g: Math.min(255, Math.round(rc.g * ringAlpha + cur.g * (1 - ringAlpha))),
+                b: Math.min(255, Math.round(rc.b * ringAlpha + cur.b * (1 - ringAlpha))),
+            };
+        });
+    });
+    return out;
+}
+
 function _tickReactiveLayers() {
     const now = performance.now();
     layers.forEach(layer => {
         if (layer.type !== 'reactive' || !layer.enabled) return;
-        const maxHold = (layer.fadeDuration || 500) * 3; // force fade after 3x duration if no release
-        Object.keys(layer._reactiveColors).forEach(idx => {
-            const key = layer._reactiveColors[idx];
-            // Force release if held too long (missed release event)
-            if (key.releaseTime === null && (now - key.pressTime) > maxHold) {
-                key.releaseTime = now;
-            }
-            if (key.releaseTime === null) return;
-            let alpha;
-            if (layer.holdMode === 'instant') {
-                alpha = 0;
-            } else {
-                const elapsed = now - key.releaseTime;
-                alpha = Math.max(0, 1 - elapsed / (layer.fadeDuration || 500));
-            }
-            if (alpha <= 0) delete layer._reactiveColors[idx];
-        });
+        if (layer.effect === 'ripple') {
+            // Prune expired ripples
+            const fadeMs = layer.fadeDuration ?? 1500;
+            layer._ripples = (layer._ripples || []).filter(rip => {
+                if (rip.releaseTime === null) return true;
+                return (now - rip.releaseTime) < fadeMs;
+            });
+        } else {
+            const maxHold = (layer.fadeDuration || 500) * 3;
+            Object.keys(layer._reactiveColors).forEach(idx => {
+                const key = layer._reactiveColors[idx];
+                if (key.releaseTime === null && (now - key.pressTime) > maxHold) {
+                    key.releaseTime = now;
+                }
+                if (key.releaseTime === null) return;
+                let alpha;
+                if (layer.holdMode === 'instant') {
+                    alpha = 0;
+                } else {
+                    const elapsed = now - key.releaseTime;
+                    alpha = Math.max(0, 1 - elapsed / (layer.fadeDuration || 500));
+                }
+                if (alpha <= 0) delete layer._reactiveColors[idx];
+            });
+        }
     });
 }
 
@@ -130,21 +209,44 @@ async function _pollReactiveLayers() {
             if (layer.type !== 'reactive' || !layer.enabled) return;
             const defaultColor = layer.color;
 
-            res.events.forEach(ev => {
-                const idx = ev.led;
-                if (ev.type === 'press') {
-                    const { r, g, b } = layer.colors?.[idx] || defaultColor;
-                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null, pressTime: now };
-                } else if (ev.type === 'release') {
-                    if (layer._reactiveColors[idx]) {
-                        layer._reactiveColors[idx].releaseTime = now;
-                    } else {
-                        // Key released without a press in our window — start fade immediately
-                        const { r, g, b } = layer.colors?.[idx] || defaultColor;
-                        layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: now, pressTime: now };
+            if (layer.effect === 'ripple') {
+                if (!layer._ripples) layer._ripples = [];
+                res.events.forEach(ev => {
+                    const idx = ev.led;
+                    const c = layer.colors?.[idx] || defaultColor;
+                    if (ev.type === 'press') {
+                        // Only add if not already held (one-per-press mode default)
+                        const alreadyHeld = layer.rippleHoldMode !== 'continuous' &&
+                            layer._ripples.some(r => r.origin === idx && r.releaseTime === null);
+                        if (!alreadyHeld) {
+                            layer._ripples.push({ origin: idx, color: c, pressTime: now, releaseTime: null });
+                        }
+                    } else if (ev.type === 'release') {
+                        // Mark most recent unfinished ripple from this key
+                        for (let i = layer._ripples.length - 1; i >= 0; i--) {
+                            if (layer._ripples[i].origin === idx && layer._ripples[i].releaseTime === null) {
+                                layer._ripples[i].releaseTime = now;
+                                break;
+                            }
+                        }
                     }
-                }
-            });
+                });
+            } else {
+                res.events.forEach(ev => {
+                    const idx = ev.led;
+                    if (ev.type === 'press') {
+                        const { r, g, b } = layer.colors?.[idx] || defaultColor;
+                        layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null, pressTime: now };
+                    } else if (ev.type === 'release') {
+                        if (layer._reactiveColors[idx]) {
+                            layer._reactiveColors[idx].releaseTime = now;
+                        } else {
+                            const { r, g, b } = layer.colors?.[idx] || defaultColor;
+                            layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: now, pressTime: now };
+                        }
+                    }
+                });
+            }
         });
     } catch (e) { /* silently ignore poll errors */ }
 }
@@ -154,11 +256,15 @@ async function _syncReactiveConfig() {
     const reactiveLayers = layers
         .filter(l => l.type === 'reactive' && l.enabled)
         .map(l => ({
+            effect:       l.effect       || 'highlight',
             color:        l.color        || {r:255,g:255,b:255},
             colors:       l.colors       || {},
             holdMode:     l.holdMode     || 'fade',
             fadeDuration: l.fadeDuration ?? 500,
             opacity:      (l.opacity     ?? 100) / 100,
+            rippleSpeed:  l.rippleSpeed  ?? 8.0,
+            rippleWidth:  l.rippleWidth  ?? 1.2,
+            rippleHoldMode: l.rippleHoldMode ?? 'once',
         }));
     const hasReactive = reactiveLayers.length > 0;
     try {
@@ -349,10 +455,14 @@ function _makeLayer(type, name, data) {
             ...base,
             effect:       data.effect       || 'highlight',
             color:        data.color        || { r: 255, g: 255, b: 255 },
-            colors:       _normalizeColors(data.colors || {}), // per-key color overrides
+            colors:       _normalizeColors(data.colors || {}),
             holdMode:     data.holdMode     || 'fade',
             fadeDuration: data.fadeDuration ?? 500,
+            rippleSpeed:  data.rippleSpeed  ?? 8.0,
+            rippleWidth:  data.rippleWidth  ?? 1.2,
+            rippleHoldMode: data.rippleHoldMode ?? 'once',
             _reactiveColors: {},
+            _ripples: [],
             _pollTs: 0,
         };
     }
@@ -842,7 +952,7 @@ function eraseLayerKey(idx) {
 // ── Reactive effect list ──────────────────────────────────────────────────────
 const REACTIVE_EFFECTS = [
     { id: 'highlight', label: 'Key Highlight', icon: '💡', desc: 'Pressed key lights up' },
-    // More effects will be added here (ripple, wave, etc.)
+    { id: 'ripple',    label: 'Ripple',        icon: '〰️', desc: 'Ring expands from key' },
 ];
 
 function renderReactiveEffectList(layer) {
@@ -897,7 +1007,73 @@ function renderReactiveEffectList(layer) {
                     style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
                 <span style="font-size:0.55rem;color:var(--dim)">Paint keys for per-key colors</span>
             </div>`;
+    } else if (activeEffect === 'ripple') {
+        const spd = layer.rippleSpeed ?? 8.0;
+        const dur = layer.fadeDuration ?? 1500;
+        const wid = layer.rippleWidth  ?? 1.2;
+        settingsEl.innerHTML = `
+            <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">While held:</span>
+                <button class="layer-type-btn ${(layer.rippleHoldMode||'once')==='once'?'active-mode':''}" onclick="setRippleHoldMode('once')" style="font-size:0.58rem;padding:3px 8px">ONE PER PRESS</button>
+                <button class="layer-type-btn ${(layer.rippleHoldMode||'once')==='continuous'?'active-mode':''}" onclick="setRippleHoldMode('continuous')" style="font-size:0.58rem;padding:3px 8px">CONTINUOUS</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Speed:</span>
+                <input type="range" min="2" max="20" step="0.5" value="${spd}"
+                    oninput="setRippleSpeed(parseFloat(this.value))"
+                    style="width:100px">
+                <span id="rsRippleSpeedVal" style="font-size:0.6rem;color:var(--text);min-width:50px">${spd} u/s</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Width:</span>
+                <input type="range" min="0.3" max="4" step="0.1" value="${wid}"
+                    oninput="setRippleWidth(parseFloat(this.value))"
+                    style="width:100px">
+                <span id="rsRippleWidthVal" style="font-size:0.6rem;color:var(--text);min-width:30px">${wid}</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Duration:</span>
+                <input type="range" min="100" max="3000" step="50" value="${dur}"
+                    oninput="setReactiveFadeDuration(parseInt(this.value))"
+                    style="width:100px">
+                <span id="rsFadeDurVal" style="font-size:0.6rem;color:var(--text);min-width:38px">${dur}ms</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Color:</span>
+                <input type="color" value="${_rgbToHex(layer.color||{r:255,g:255,b:255})}"
+                    oninput="setReactiveColor(this.value)"
+                    style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
+            </div>`;
     }
+}
+
+function setRippleSpeed(val) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.rippleSpeed = val;
+    const el = document.getElementById('rsRippleSpeedVal');
+    if (el) el.textContent = val + ' u/s';
+    _reactiveSynced = false;
+    _syncReactiveConfig();
+}
+
+function setRippleHoldMode(mode) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.rippleHoldMode = mode;
+    renderReactiveEffectList(layer);
+    _reactiveSynced = false;
+    _syncReactiveConfig();
+}
+
+function setRippleWidth(val) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.rippleWidth = val;
+    const el = document.getElementById('rsRippleWidthVal');
+    if (el) el.textContent = val;
+    _reactiveSynced = false;
+    _syncReactiveConfig();
 }
 
 function _rgbToHex(c) {
@@ -1096,6 +1272,9 @@ function _serializeLayers() {
             out.colors       = l.colors       || {};
             out.holdMode     = l.holdMode     || 'fade';
             out.fadeDuration = l.fadeDuration ?? 500;
+            out.rippleSpeed  = l.rippleSpeed  ?? 8.0;
+            out.rippleWidth  = l.rippleWidth  ?? 1.2;
+            out.rippleHoldMode = l.rippleHoldMode ?? 'once';
         } else {
             out.loop = l.loop !== false;
             out.frames = (l.frames || []).map(f => ({ duration: f.duration, colors: f.colors || {} }));

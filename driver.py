@@ -170,6 +170,47 @@ class ShmKeys:
 
 
 
+
+# ── LED coordinate map (x, y in key units) ────────────────────────────────────
+LED_COORDS = {
+    '01':(0.50,0),'02':(2.00,0),'03':(3.00,0),'04':(4.00,0),'05':(5.00,0),
+    '06':(6.50,0),'07':(7.50,0),'08':(8.50,0),'09':(9.50,0),
+    '0a':(11.00,0),'0b':(12.00,0),'0c':(13.00,0),'0d':(14.00,0),
+    '13':(0.50,1),'14':(1.50,1),'15':(2.50,1),'16':(3.50,1),'17':(4.50,1),
+    '18':(5.50,1),'19':(6.50,1),'1a':(7.50,1),'1b':(8.50,1),
+    '1c':(9.50,1),'1d':(10.50,1),'1e':(11.50,1),'1f':(12.50,1),'67':(14.00,1),
+    '25':(0.75,2),'26':(1.50,2),'27':(2.50,2),'28':(3.50,2),'29':(4.50,2),
+    '2a':(5.50,2),'2b':(6.50,2),'2c':(7.50,2),'2d':(8.50,2),
+    '2e':(9.50,2),'2f':(10.50,2),'30':(11.50,2),'31':(12.50,2),'43':(13.75,2),
+    '37':(0.875,3),'38':(1.75,3),'39':(2.75,3),'3a':(3.75,3),'3b':(4.75,3),
+    '3c':(5.75,3),'3d':(6.75,3),'3e':(7.75,3),'3f':(8.75,3),
+    '40':(9.75,3),'41':(10.75,3),'42':(11.75,3),'55':(13.125,3),
+    '49':(1.125,4),'4a':(2.25,4),'4b':(3.25,4),'4c':(4.25,4),'4d':(5.25,4),
+    '4e':(6.25,4),'4f':(7.25,4),'50':(8.25,4),'51':(9.25,4),
+    '52':(10.25,4),'53':(11.25,4),'54':(12.625,4),
+    '5b':(0.75,5),'5c':(1.50,5),'5d':(2.25,5),'5e':(6.00,5),
+    '5f':(9.75,5),'60':(10.75,5),'61':(11.75,5),'62':(12.75,5),
+    # Nav cluster
+    '70':(16.5,0),'71':(17.5,0),'73':(18.5,0),
+    '74':(16.5,1),'75':(17.5,1),'76':(18.5,1),
+    '77':(16.5,2),'78':(17.5,2),'79':(18.5,2),
+    '65':(17.5,4),'63':(16.5,5),'64':(17.5,5),'66':(18.5,5),
+    # Numpad
+    '20':(20.0,1),'21':(21.0,1),'22':(22.0,1),'7a':(23.0,1),
+    '32':(20.0,2),'33':(21.0,2),'34':(22.0,2),'7b':(23.0,2),
+    '44':(20.0,3),'45':(21.0,3),'46':(22.0,3),
+    '56':(20.0,4),'57':(21.0,4),'58':(22.0,4),'6a':(23.0,4),
+    '68':(20.5,5),'69':(22.0,5),
+}
+
+def _led_dist(a, b):
+    """Euclidean distance between two LED indices."""
+    if a not in LED_COORDS or b not in LED_COORDS:
+        return 999.0
+    ax, ay = LED_COORDS[a]
+    bx, by = LED_COORDS[b]
+    return ((ax-bx)**2 + (ay-by)**2) ** 0.5
+
 # ── VK → LED map ──────────────────────────────────────────────────────────────
 VK_TO_LED = {
     27:  '01',  112: '02',  113: '03',  114: '04',  115: '05',
@@ -290,8 +331,11 @@ class Driver:
             new_layers = []
             for i, cfg in enumerate(layers or []):
                 if not isinstance(cfg, dict): continue
-                # Reuse existing active state if layer index matches
-                existing = self._reactive_layers[i]['active'] if i < len(self._reactive_layers) else {}
+                effect = cfg.get('effect', 'highlight')
+                if i < len(self._reactive_layers) and self._reactive_layers[i]['cfg'].get('effect') == effect:
+                    existing = self._reactive_layers[i]['active']
+                else:
+                    existing = [] if effect == 'ripple' else {}
                 new_layers.append({'cfg': cfg, 'active': existing})
             self._reactive_layers = new_layers
 
@@ -300,38 +344,78 @@ class Driver:
             now   = time.monotonic()
             frame = dict(self._base_frame)
 
-            # Composite reactive layers bottom-to-top (last index = bottom, 0 = top)
-            for layer_state in reversed(self._reactive_layers):
+            for layer_state in reversed(self._reactive_layers):  # bottom first, top (index 0) last = wins
                 cfg     = layer_state['cfg']
                 active  = layer_state['active']
-                fade_s  = (cfg.get('fadeDuration', 500)) / 1000.0
-                hold    = cfg.get('holdMode', 'fade')
+                effect  = cfg.get('effect', 'highlight')
                 opacity = cfg.get('opacity', 1.0)
-                to_del  = []
 
-                for idx, key in active.items():
-                    rt = key['release_ts']
-                    if rt is not None:
-                        if hold == 'instant':
-                            to_del.append(idx); continue
-                        alpha = max(0.0, 1.0 - (now - rt) / max(fade_s, 0.001))
-                        if alpha <= 0:
-                            to_del.append(idx); continue
-                    else:
-                        alpha = 1.0
-                    alpha *= opacity
-                    # Blend over current frame (which already has lower layers)
-                    cur = frame.get(idx, [0, 0, 0])
-                    cr, cg, cb = (cur if isinstance(cur, (list,tuple)) else [cur.get('r',0), cur.get('g',0), cur.get('b',0)])
-                    frame[idx] = [
-                        int(key['r'] * alpha + cr * (1 - alpha)),
-                        int(key['g'] * alpha + cg * (1 - alpha)),
-                        int(key['b'] * alpha + cb * (1 - alpha)),
-                    ]
-                for idx in to_del:
-                    del active[idx]
+                if effect == 'ripple':
+                    self._apply_ripple(frame, active, cfg, now, opacity)
+                else:
+                    self._apply_highlight(frame, active, cfg, now, opacity)
 
             return frame
+
+    def _apply_highlight(self, frame, active, cfg, now, opacity):
+        fade_s = cfg.get('fadeDuration', 500) / 1000.0
+        hold   = cfg.get('holdMode', 'fade')
+        to_del = []
+        for idx, key in active.items():
+            rt = key['release_ts']
+            if rt is not None:
+                if hold == 'instant':
+                    to_del.append(idx); continue
+                alpha = max(0.0, 1.0 - (now - rt) / max(fade_s, 0.001))
+                if alpha <= 0:
+                    to_del.append(idx); continue
+            else:
+                alpha = 1.0
+            alpha *= opacity
+            cur = frame.get(idx, [0,0,0])
+            cr,cg,cb = cur if isinstance(cur,(list,tuple)) else [cur.get('r',0),cur.get('g',0),cur.get('b',0)]
+            frame[idx] = [int(key['r']*alpha+cr*(1-alpha)), int(key['g']*alpha+cg*(1-alpha)), int(key['b']*alpha+cb*(1-alpha))]
+        for idx in to_del:
+            del active[idx]
+
+    def _apply_ripple(self, frame, active, cfg, now, opacity):
+        """Expanding ring ripple — active is a list of ripple objects."""
+        fade_s = cfg.get('fadeDuration', 1500) / 1000.0
+        speed  = cfg.get('rippleSpeed', 8.0)
+        width  = cfg.get('rippleWidth', 1.2)
+
+        to_del = []
+        for i, ripple in enumerate(active):
+            elapsed = now - ripple['press_ts']
+            ring_r  = elapsed * speed
+
+            rt = ripple['release_ts']
+            if rt is not None:
+                fade_alpha = max(0.0, 1.0 - (now - rt) / max(fade_s, 0.001))
+                if fade_alpha <= 0:
+                    to_del.append(i); continue
+            else:
+                fade_alpha = 1.0
+
+            for idx in LED_COORDS:
+                dist = _led_dist(ripple['origin'], idx)
+                diff = abs(dist - ring_r)
+                if diff > width * 2:
+                    continue
+                ring_alpha = max(0.0, 1.0 - diff / width) * fade_alpha * opacity
+                if ring_alpha <= 0:
+                    continue
+                cur = frame.get(idx, [0,0,0])
+                cr,cg,cb = cur if isinstance(cur,(list,tuple)) else [cur.get('r',0),cur.get('g',0),cur.get('b',0)]
+                frame[idx] = [
+                    min(255, int(ripple['r']*ring_alpha + cr*(1-ring_alpha))),
+                    min(255, int(ripple['g']*ring_alpha + cg*(1-ring_alpha))),
+                    min(255, int(ripple['b']*ring_alpha + cb*(1-ring_alpha))),
+                ]
+
+        # Remove expired ripples (reverse order to preserve indices)
+        for i in reversed(to_del):
+            active.pop(i)
 
     def _on_key_event(self, led, kind):
         """Called from hook thread."""
@@ -348,17 +432,39 @@ class Driver:
             for layer_state in self._reactive_layers:
                 cfg    = layer_state['cfg']
                 active = layer_state['active']
-                if kind == 'press':
-                    if led in active and active[led]['release_ts'] is None:
-                        continue  # ignore repeat for this layer
-                    c = cfg.get('colors', {}).get(led) or cfg.get('color', {'r':255,'g':255,'b':255})
-                    if isinstance(c, (list, tuple)):
-                        r, g, b = int(c[0]), int(c[1]), int(c[2])
-                    else:
-                        r, g, b = int(c.get('r',255)), int(c.get('g',255)), int(c.get('b',255))
-                    active[led] = {'r':r,'g':g,'b':b,'release_ts':None}
-                elif kind == 'release' and led in active:
-                    active[led]['release_ts'] = now
+                effect = cfg.get('effect', 'highlight')
+                c = cfg.get('colors', {}).get(led) or cfg.get('color', {'r':255,'g':255,'b':255})
+                if isinstance(c, (list, tuple)):
+                    r, g, b = int(c[0]), int(c[1]), int(c[2])
+                else:
+                    r, g, b = int(c.get('r',255)), int(c.get('g',255)), int(c.get('b',255))
+
+                if effect == 'ripple':
+                    if kind == 'press':
+                        hold_mode = cfg.get('rippleHoldMode', 'once')
+                        if hold_mode == 'once':
+                            already_held = any(
+                                rip['origin'] == led and rip['release_ts'] is None
+                                for rip in active
+                            )
+                            if already_held:
+                                continue
+                        active.append({'origin': led, 'r':r,'g':g,'b':b,
+                                       'press_ts': now, 'release_ts': None})
+                    elif kind == 'release':
+                        # Mark the most recent unfinished ripple from this key
+                        for ripple in reversed(active):
+                            if ripple['origin'] == led and ripple['release_ts'] is None:
+                                ripple['release_ts'] = now
+                                break
+                else:
+                    # active is a dict — one entry per key
+                    if kind == 'press':
+                        if led in active and active[led]['release_ts'] is None:
+                            continue  # ignore key repeat
+                        active[led] = {'r':r,'g':g,'b':b,'release_ts':None,'press_ts':now}
+                    elif kind == 'release' and led in active:
+                        active[led]['release_ts'] = now
 
         frame = self._build_reactive_frame()
         self._queue_frame(frame)
