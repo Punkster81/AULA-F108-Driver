@@ -821,28 +821,63 @@ function renderLayerStrip() {
         card.dataset.idx = i;
 
         const typeIcon = layer.type === 'animation' ? '🎬' : layer.type === 'reactive' ? '⚡' : '✏️';
-        const meta     = layer.type === 'animation' ? `${layer.frames?.length || 0}f` : layer.type === 'reactive' ? 'reactive' : 'static';
+        const effectTag = layer.type === 'reactive' ? (layer.effect || 'highlight') : layer.type === 'animation' ? `${layer.frames?.length || 0}f` : '';
+        const layerNum = i + 1;
 
         card.innerHTML = `
             <div class="layer-card-top">
-                <button class="lc-vis" onclick="event.stopPropagation();toggleLayerEnabled(${layer.id})"
-                class="lc-vis${layer.enabled ? '' : ' lc-vis-off'}"
-                >${'👁️'}</button>
+                <span class="lc-num">${layerNum}</span>
                 <span class="lc-icon">${typeIcon}</span>
-                <span class="lc-name">${layer.name}</span>
-                <span class="lc-meta">${meta}</span>
-                <div class="lc-arrows">
-                    <button onclick="event.stopPropagation();moveLayerUp(${layer.id})" ${i===0?'disabled':''}>▲</button>
-                    <button onclick="event.stopPropagation();moveLayerDown(${layer.id})" ${i===layers.length-1?'disabled':''}>▼</button>
-                </div>
-                <button class="lc-del" onclick="event.stopPropagation();removeLayer(${layer.id})">✕</button>
+                <span class="lc-name" title="Double-click to rename">${layer.name}</span>
+                ${effectTag ? `<span class="lc-meta">${effectTag}</span>` : ''}
+                <button class="lc-vis${layer.enabled ? '' : ' lc-vis-off'}"
+                    onclick="event.stopPropagation();toggleLayerEnabled(${layer.id})"
+                    title="Toggle visibility">👁️</button>
+                <button class="lc-del" onclick="event.stopPropagation();removeLayer(${layer.id})" title="Delete">✕</button>
             </div>
             <div class="layer-card-bar">
+                <span style="font-size:0.55rem;color:var(--dim);flex-shrink:0">opacity</span>
                 <input type="range" min="0" max="100" value="${layer.opacity}"
                     oninput="event.stopPropagation();layers.find(l=>l.id===${layer.id}).opacity=parseInt(this.value);this.nextElementSibling.textContent=this.value+'%'"
                     onclick="event.stopPropagation()">
                 <span>${layer.opacity}%</span>
             </div>`;
+
+        // Double-click name to rename inline
+        // Rename on double-click — use timer to delay selectLayer so dblclick can cancel it
+        const nameEl = card.querySelector('.lc-name');
+        let _renameClickTimer = null;
+        nameEl.addEventListener('click', e => {
+            e.stopPropagation();
+            clearTimeout(_renameClickTimer);
+            _renameClickTimer = setTimeout(() => selectLayer(layer.id), 200);
+        });
+        nameEl.addEventListener('dblclick', e => {
+            e.stopPropagation();
+            clearTimeout(_renameClickTimer);
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = layer.name;
+            input.style.cssText = 'flex:1;font-size:0.7rem;font-weight:500;background:var(--key-off);border:1px solid var(--accent);border-radius:3px;color:var(--text);padding:0 4px;min-width:0;outline:none;width:0';
+            nameEl.replaceWith(input);
+            input.focus();
+            input.select();
+            let committed = false;
+            const commit = () => {
+                if (committed) return;
+                committed = true;
+                layer.name = input.value.trim() || layer.name;
+                renderLayerStrip();
+            };
+            input.addEventListener('blur', commit);
+            input.addEventListener('keydown', e2 => {
+                e2.stopPropagation();
+                if (e2.key === 'Enter') { e2.preventDefault(); input.blur(); }
+                if (e2.key === 'Escape') { committed = true; input.blur(); renderLayerStrip(); }
+            });
+            input.addEventListener('click', e2 => e2.stopPropagation());
+            input.addEventListener('mousedown', e2 => e2.stopPropagation());
+        });
 
         // Prevent drag when using the opacity slider
         const slider = card.querySelector('input[type=range]');
@@ -877,7 +912,10 @@ function renderLayerStrip() {
             _refreshKeyboard();
         });
 
-        card.addEventListener('click', () => selectLayer(layer.id));
+        card.addEventListener('click', e => {
+            if (e.target === nameEl || e.target.classList.contains('lc-name')) return;
+            selectLayer(layer.id);
+        });
         strip.appendChild(card);
     });
 
