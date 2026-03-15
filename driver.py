@@ -212,8 +212,7 @@ class Driver:
         self._shm_frame   = None
         self._shm_keys    = None
         self._running     = False
-        self._reactive_cfg = {}      # {color, colors, holdMode, fadeDuration}
-        self._reactive_active = {}   # led → {r,g,b,alpha,release_ts}
+        self._reactive_layers  = []     # list of {cfg, active} per layer
         self._reactive_enabled = False
         self._reactive_lock = threading.Lock()
         self._base_frame  = {}       # last frame from shm (non-reactive)
@@ -283,37 +282,55 @@ class Driver:
     # ── Reactive engine ───────────────────────────────────────────────────────
     def set_reactive_config(self, layers, enabled):
         with self._reactive_lock:
-            # layers is a list — take the first enabled reactive layer as config
-            cfg = {}
-            if layers:
-                cfg = layers[0] if isinstance(layers, list) else layers
-            self._reactive_cfg = cfg
             self._reactive_enabled = bool(enabled)
             if not enabled:
-                self._reactive_active.clear()
-        print(f'[driver] reactive: enabled={enabled} cfg={cfg}', flush=True)
+                self._reactive_layers = []
+                return
+            # Build per-layer state, preserving existing active keys where layer matches
+            new_layers = []
+            for i, cfg in enumerate(layers or []):
+                if not isinstance(cfg, dict): continue
+                # Reuse existing active state if layer index matches
+                existing = self._reactive_layers[i]['active'] if i < len(self._reactive_layers) else {}
+                new_layers.append({'cfg': cfg, 'active': existing})
+            self._reactive_layers = new_layers
 
     def _build_reactive_frame(self):
         with self._reactive_lock:
-            cfg    = self._reactive_cfg
-            fade_s = (cfg.get('fadeDuration', 500)) / 1000.0
-            hold   = cfg.get('holdMode', 'fade')
-            now    = time.monotonic()
-            frame  = dict(self._base_frame)
-            to_del = []
-            for idx, key in self._reactive_active.items():
-                rt = key['release_ts']
-                if rt is not None:
-                    if hold == 'instant':
-                        to_del.append(idx); continue
-                    alpha = max(0.0, 1.0 - (now - rt) / max(fade_s, 0.001))
-                    if alpha <= 0:
-                        to_del.append(idx); continue
-                else:
-                    alpha = 1.0
-                frame[idx] = [int(key['r']*alpha), int(key['g']*alpha), int(key['b']*alpha)]
-            for idx in to_del:
-                del self._reactive_active[idx]
+            now   = time.monotonic()
+            frame = dict(self._base_frame)
+
+            # Composite reactive layers bottom-to-top (last index = bottom, 0 = top)
+            for layer_state in reversed(self._reactive_layers):
+                cfg     = layer_state['cfg']
+                active  = layer_state['active']
+                fade_s  = (cfg.get('fadeDuration', 500)) / 1000.0
+                hold    = cfg.get('holdMode', 'fade')
+                opacity = cfg.get('opacity', 1.0)
+                to_del  = []
+
+                for idx, key in active.items():
+                    rt = key['release_ts']
+                    if rt is not None:
+                        if hold == 'instant':
+                            to_del.append(idx); continue
+                        alpha = max(0.0, 1.0 - (now - rt) / max(fade_s, 0.001))
+                        if alpha <= 0:
+                            to_del.append(idx); continue
+                    else:
+                        alpha = 1.0
+                    alpha *= opacity
+                    # Blend over current frame (which already has lower layers)
+                    cur = frame.get(idx, [0, 0, 0])
+                    cr, cg, cb = (cur if isinstance(cur, (list,tuple)) else [cur.get('r',0), cur.get('g',0), cur.get('b',0)])
+                    frame[idx] = [
+                        int(key['r'] * alpha + cr * (1 - alpha)),
+                        int(key['g'] * alpha + cg * (1 - alpha)),
+                        int(key['b'] * alpha + cb * (1 - alpha)),
+                    ]
+                for idx in to_del:
+                    del active[idx]
+
             return frame
 
     def _on_key_event(self, led, kind):
@@ -325,22 +342,23 @@ class Driver:
 
         # Update reactive state and queue a frame
         with self._reactive_lock:
-            if not self._reactive_enabled or not self._reactive_cfg:
+            if not self._reactive_enabled or not self._reactive_layers:
                 return
-            cfg = self._reactive_cfg
             now = time.monotonic()
-            if kind == 'press':
-                # Ignore key repeat — don't reset a key that's already held
-                if led in self._reactive_active and self._reactive_active[led]['release_ts'] is None:
-                    return
-                c = cfg.get('colors', {}).get(led) or cfg.get('color', {'r':255,'g':255,'b':255})
-                if isinstance(c, (list, tuple)):
-                    r, g, b = int(c[0]), int(c[1]), int(c[2])
-                else:
-                    r, g, b = int(c.get('r',255)), int(c.get('g',255)), int(c.get('b',255))
-                self._reactive_active[led] = {'r':r,'g':g,'b':b,'release_ts':None}
-            elif kind == 'release' and led in self._reactive_active:
-                self._reactive_active[led]['release_ts'] = now
+            for layer_state in self._reactive_layers:
+                cfg    = layer_state['cfg']
+                active = layer_state['active']
+                if kind == 'press':
+                    if led in active and active[led]['release_ts'] is None:
+                        continue  # ignore repeat for this layer
+                    c = cfg.get('colors', {}).get(led) or cfg.get('color', {'r':255,'g':255,'b':255})
+                    if isinstance(c, (list, tuple)):
+                        r, g, b = int(c[0]), int(c[1]), int(c[2])
+                    else:
+                        r, g, b = int(c.get('r',255)), int(c.get('g',255)), int(c.get('b',255))
+                    active[led] = {'r':r,'g':g,'b':b,'release_ts':None}
+                elif kind == 'release' and led in active:
+                    active[led]['release_ts'] = now
 
         frame = self._build_reactive_frame()
         self._queue_frame(frame)
@@ -352,7 +370,7 @@ class Driver:
             time.sleep(0.030)
             tick += 1
             if tick % 100 == 0:
-                print(f'[driver] alive enabled={self._reactive_enabled} keys={len(self._reactive_active)}', flush=True)
+                print(f'[driver] alive enabled={self._reactive_enabled} layers={len(self._reactive_layers)}', flush=True)
             if not self._reactive_enabled:
                 continue
             frame = self._build_reactive_frame()

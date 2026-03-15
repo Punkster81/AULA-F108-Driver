@@ -158,6 +158,7 @@ async function _syncReactiveConfig() {
             colors:       l.colors       || {},
             holdMode:     l.holdMode     || 'fade',
             fadeDuration: l.fadeDuration ?? 500,
+            opacity:      (l.opacity     ?? 100) / 100,
         }));
     const hasReactive = reactiveLayers.length > 0;
     try {
