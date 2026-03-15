@@ -9,8 +9,62 @@ import os
 import json
 import threading
 import winreg
+import subprocess as _subprocess
 
-# ── Startup registry helpers ──────────────────────────────────────────────────
+# ── Launch driver subprocess BEFORE importing webview ─────────────────────────
+# pywebview/CEF crashes if subprocesses are spawned after it initializes.
+# Start driver here at the very top, before any webview import.
+_driver_proc = None
+_shm_frame   = None
+_shm_keys    = None
+
+def _launch_driver_early():
+    global _driver_proc, _shm_frame, _shm_keys
+    import ctypes
+    driver_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'driver.py')
+
+    # Check if already running as admin
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        is_admin = False
+
+    if is_admin:
+        # Already admin — spawn directly
+        _driver_proc = _subprocess.Popen(
+            [sys.executable, driver_script],
+            stdin=_subprocess.DEVNULL,
+            creationflags=getattr(_subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+        )
+    else:
+        # Request elevation via UAC — ShellExecuteW with 'runas'
+        import ctypes.wintypes
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, 'runas', sys.executable, f'"{driver_script}"', None, 0
+        )
+        if ret <= 32:
+            print(f'[ui] ShellExecuteW failed ({ret}), trying direct launch', flush=True)
+            _driver_proc = _subprocess.Popen(
+                [sys.executable, driver_script],
+                stdin=_subprocess.DEVNULL,
+            )
+        else:
+            print('[ui] Driver launched with admin elevation', flush=True)
+            # ShellExecuteW doesn't give us a Popen handle — use a sentinel
+            _driver_proc = type('FakePopen', (), {'poll': lambda self: None})()
+
+    import time as _t; _t.sleep(1.2)
+    try:
+        from driver import ShmFrame, ShmKeys
+        _shm_frame = ShmFrame(create=False)
+        _shm_keys  = ShmKeys(create=False)
+        print('[ui] Attached to driver shared memory', flush=True)
+    except Exception as e:
+        print(f'[ui] shm attach failed: {e}', flush=True)
+
+_launch_driver_early()
+
+import webview
 _STARTUP_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _STARTUP_NAME = "AulaF108RGBDriver"
 
@@ -45,105 +99,77 @@ def is_startup_enabled() -> bool:
         return False
     except Exception:
         return False
-import webview
 
 # ── Path helper (works both from source and PyInstaller bundle) ───────────────
 def resource(rel):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
 
+def _send_driver_cmd(cmd: str, payload=None):
+    """Write a structured JSON command file for the driver to pick up."""
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        tmp_file = os.path.join(base, 'driver_cmd.tmp')
+        cmd_file = os.path.join(base, 'driver_cmd.json')
+        data = {'cmd': cmd}
+        if payload is not None:
+            data['payload'] = payload
+        with open(tmp_file, 'w') as f:
+            json.dump(data, f)
+        os.replace(tmp_file, cmd_file)  # atomic on Windows
+        print(f'[ui] sent cmd={cmd_type}', flush=True)
+    except Exception:
+        pass
+
+def _stop_driver():
+    global _driver_proc
+    _send_driver_cmd('STOP')
+    if _driver_proc and hasattr(_driver_proc, 'terminate'):
+        import time as _t; _t.sleep(0.5)
+        try: _driver_proc.terminate()
+        except: pass
+    _driver_proc = None
+
 # ── Keyboard API (exposed to JS via window.pywebview.api) ─────────────────────
 class KeyboardAPI:
     def __init__(self):
-        self._kb = None
-        self._lock = threading.Lock()
+        pass  # HID now owned by driver process
 
-    # ── Connection ─────────────────────────────────────────────────────────────
     def connect(self):
-        """
-        Try to connect to the keyboard.
-        Returns {ok, message, colors} where colors is {hex_idx: [r,g,b]} of
-        the keyboard's current LED state (populated on success).
-        """
-        try:
-            from aula_f108_pro_final import AulaF108Pro
-            with self._lock:
-                if self._kb:
-                    self._kb.disconnect()
-                self._kb = AulaF108Pro()
-                colors = self._kb.connect()
-                _reactive_state.start()
-                if colors is not None:
-                    self._kb.start()
-                    return {'ok': True, 'message': 'Connected — VID:0C45 PID:800A', 'colors': colors}
-                else:
-                    self._kb = None
-                    return {'ok': False, 'message': 'Keyboard not found. Is AULA software closed?', 'colors': {}}
-        except Exception as e:
-            return {'ok': False, 'message': str(e), 'colors': {}}
+        import time as _t
+        # Wait up to 3s for driver to be alive
+        for _ in range(15):
+            if _driver_proc is not None and _driver_proc.poll() is None:
+                return {'ok': True, 'message': 'Connected — VID:0C45 PID:800A', 'colors': {}}
+            _t.sleep(0.2)
+        return {'ok': False, 'message': 'Keyboard not found. Is AULA software closed?', 'colors': {}}
 
     def disconnect(self):
-        with self._lock:
-            if self._kb:
-                self._kb.disconnect()
-                self._kb = None
         return {'ok': True}
 
     def get_status(self):
-        with self._lock:
-            connected = self._kb is not None
-        return {'connected': connected}
+        alive = _driver_proc is not None and _driver_proc.poll() is None
+        return {'connected': alive}
 
-    # ── Color control ──────────────────────────────────────────────────────────
     def apply_colors(self, colors):
-        """
-        Apply a full color map to the keyboard immediately.
-        colors: dict of {"hex_idx": [r, g, b], ...}  e.g. {"01": [255, 0, 0]}
-        """
-        with self._lock:
-            if not self._kb:
-                return {'ok': False, 'message': 'Not connected'}
+        if _shm_frame:
             try:
-                # Clear first, then apply only lit keys
-                self._kb.clear()
-                for idx_str, rgb in colors.items():
-                    self._kb.set_index(int(idx_str, 16), rgb[0], rgb[1], rgb[2])
+                _shm_frame.write(colors)
                 return {'ok': True}
             except Exception as e:
                 return {'ok': False, 'message': str(e)}
+        return {'ok': True}  # driver still starting, silently skip
 
     def apply_frame(self, colors):
-        """Same as apply_colors — used by animation playback."""
         return self.apply_colors(colors)
 
     def clear(self):
-        with self._lock:
-            if not self._kb:
-                return {'ok': False, 'message': 'Not connected'}
-            try:
-                self._kb.clear()
-                return {'ok': True}
-            except Exception as e:
-                return {'ok': False, 'message': str(e)}
+        return self.apply_colors({})
 
-    # ── Flash save ─────────────────────────────────────────────────────────────
     def save_to_flash(self, colors):
-        """
-        Burn colors to onboard flash.
-        Returns {ok, message}.
-        """
-        with self._lock:
-            if not self._kb:
-                return {'ok': False, 'message': 'Not connected'}
-            try:
-                # Apply colors first so save picks them up
-                self._kb.clear()
-                for idx_str, rgb in colors.items():
-                    self._kb.set_index(int(idx_str, 16), rgb[0], rgb[1], rgb[2])
-                self._kb.save()
-                return {'ok': True, 'message': 'Saved — colors will persist after power cycle'}
-            except Exception as e:
-                return {'ok': False, 'message': str(e)}
+        """Send SAVE_FLASH command to driver process."""
+        _send_driver_cmd('SAVE_FLASH', colors)
+        return {'ok': True, 'message': 'Saved — colors will persist after power cycle'}
 
 
 # ── Animation file helpers ────────────────────────────────────────────────────
@@ -421,222 +447,36 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
-    # ── Reactive key state ─────────────────────────────────────────────────────
-    def start_key_listener(self):
-        """Start the global key listener. Safe to call multiple times."""
+    def update_reactive_config(self, layers, enabled):
+        """Send reactive config to driver via command file."""
         try:
-            _reactive_state.start()
+            _send_driver_cmd('REACTIVE_CFG', {'layers': layers, 'enabled': enabled})
             return {'ok': True}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
+
+    def start_key_listener(self):
+        return {'ok': True}
 
     def stop_key_listener(self):
-        """Stop the global key listener."""
-        try:
-            _reactive_state.stop()
-            return {'ok': True}
-        except Exception as e:
-            return {'ok': False, 'message': str(e)}
+        return {'ok': True}
 
     def poll_keys(self, since_ts):
-        """
-        Poll key state since the given timestamp.
-        Returns {ok, ts, held: [led_idx, ...], events: [{led, type, ts}]}
-        """
         try:
-            return _reactive_state.poll(since_ts)
+            if not _shm_keys:
+                return {'ok': True, 'ts': since_ts, 'held': [], 'events': []}
+            events, held, now = _shm_keys.read_events(since_ts)
+            return {'ok': True, 'ts': now, 'held': list(held), 'events': events}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
 
-
-# Tracks currently pressed LED indices and recent press events for the JS
-# reactive layer system. Runs pynput in a daemon thread.
-
-import time as _time
-
-class ReactiveKeyState:
-    def __init__(self):
-        self._lock    = threading.Lock()
-        self._held    = set()
-        self._events  = []
-        self._running = False
-
-    def start(self):
-        if self._running:
-            return
-        self._running = True
-        t = threading.Thread(target=self._run, daemon=True)
-        t.start()
-
-    def stop(self):
-        self._running = False
-        # Post WM_QUIT to unblock the GetMessageW pump
-        try:
-            import ctypes
-            ctypes.WinDLL('user32').PostQuitMessage(0)
-        except Exception:
-            pass
-
-    def _run(self):
-        import ctypes
-        import ctypes.wintypes
-
-        LLKHF_EXTENDED = 0x0001
-        WH_KEYBOARD_LL = 13
-        WM_KEYDOWN     = 0x0100
-        WM_SYSKEYDOWN  = 0x0104
-        WM_KEYUP       = 0x0101
-        WM_SYSKEYUP    = 0x0105
-
-        class KBDLLHOOKSTRUCT(ctypes.Structure):
-            _fields_ = [
-                ('vkCode',      ctypes.wintypes.DWORD),
-                ('scanCode',    ctypes.wintypes.DWORD),
-                ('flags',       ctypes.wintypes.DWORD),
-                ('time',        ctypes.wintypes.DWORD),
-                ('dwExtraInfo', ctypes.POINTER(ctypes.c_ulong)),
-            ]
-
-        user32 = ctypes.WinDLL('user32', use_last_error=True)
-
-        NUMPAD_NUMLOCK_OFF = {
-            35: '56',  # End   → Num1
-            40: '57',  # Down  → Num2
-            34: '58',  # PgDn  → Num3
-            37: '44',  # Left  → Num4
-            12: '45',  # Clear → Num5
-            39: '46',  # Right → Num6
-            36: '32',  # Home  → Num7
-            38: '33',  # Up    → Num8
-            33: '34',  # PgUp  → Num9
-            45: '68',  # Ins   → Num0
-            46: '69',  # Del   → Num.
-        }
-
-        def _is_numlock_on():
-            return bool(user32.GetKeyState(144) & 1)
-
-        def _resolve_led(vk, extended):
-            # Numpad Enter: extended=True, main Enter: extended=False
-            if vk == 13:
-                return '6a' if extended else '55'
-            # NumLock off: numpad keys report as nav-cluster VKs
-            if not _is_numlock_on() and vk in NUMPAD_NUMLOCK_OFF:
-                return NUMPAD_NUMLOCK_OFF[vk]
-            return VK_TO_LED.get(vk)
-
-        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int,
-                                       ctypes.wintypes.WPARAM,
-                                       ctypes.wintypes.LPARAM)
-
-        user32.CallNextHookEx.restype  = ctypes.c_long
-        user32.CallNextHookEx.argtypes = [
-            ctypes.c_void_p, ctypes.c_int,
-            ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
-        ]
-        user32.SetWindowsHookExW.restype  = ctypes.c_void_p
-        user32.SetWindowsHookExW.argtypes = [
-            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD
-        ]
-        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
-
-        def _hook_proc(nCode, wParam, lParam):
-            if nCode >= 0:
-                kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                vk       = kb.vkCode
-                extended = bool(kb.flags & LLKHF_EXTENDED)
-                led      = _resolve_led(vk, extended)
-                if led:
-                    is_down = wParam in (WM_KEYDOWN, WM_SYSKEYDOWN)
-                    is_up   = wParam in (WM_KEYUP,   WM_SYSKEYUP)
-                    if is_down or is_up:
-                        with self._lock:
-                            if is_down:
-                                print(f'[reactive] press led=0x{led}', flush=True)
-                                self._held.add(led)
-                                self._events.append((led, 'press', _time.time()))
-                            else:
-                                self._held.discard(led)
-                                self._events.append((led, 'release', _time.time()))
-                            if len(self._events) > 256:
-                                self._events = self._events[-256:]
-            return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-        _proc = HOOKPROC(_hook_proc)
-
-        # Hook must be installed AND pumped on the same thread.
-        # Use a blocking GetMessageW pump — never sleeps, always ready.
-        import queue as _queue
-        _ready = threading.Event()
-
-        def _pump_thread():
-            nonlocal _proc
-            h = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _proc, None, 0)
-            if not h:
-                print(f'[reactive] SetWindowsHookExW failed: {ctypes.get_last_error()}', flush=True)
-                _ready.set()
-                return
-            _ready.set()
-            # Blocking message pump — GetMessageW blocks until a message arrives
-            msg = ctypes.wintypes.MSG()
-            while self._running:
-                ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-                if ret == 0 or ret == -1:
-                    break
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
-            user32.UnhookWindowsHookEx(h)
-
-        t = threading.Thread(target=_pump_thread, daemon=True)
-        t.start()
-        _ready.wait(timeout=2.0)  # wait for hook to be installed before returning
-
-
-    def poll(self, since_ts: float):
-        """Return held keys + events since since_ts. Called by JS every frame."""
-        with self._lock:
-            now = _time.time()
-            events = [
-                {'led': e[0], 'type': e[1], 'ts': e[2]}
-                for e in self._events if e[2] >= since_ts
-            ]
-            held = list(self._held)
-        return {'ok': True, 'ts': now, 'held': held, 'events': events}
-
-
-# VK → LED index map (Windows Virtual Key codes → AULA F108 LED indices)
-VK_TO_LED = {
-    27:  '01',  112: '02',  113: '03',  114: '04',  115: '05',
-    116: '06',  117: '07',  118: '08',  119: '09',  120: '0a',
-    121: '0b',  122: '0c',  123: '0d',   44: '70',  145: '71',
-     19: '73',  192: '13',   49: '14',   50: '15',   51: '16',
-     52: '17',   53: '18',   54: '19',   55: '1a',   56: '1b',
-     57: '1c',   48: '1d',  189: '1e',  187: '1f',    8: '67',
-     45: '74',   36: '75',   33: '76',   46: '77',   35: '78',
-     34: '79',    9: '25',   81: '26',   87: '27',   69: '28',
-     82: '29',   84: '2a',   89: '2b',   85: '2c',   73: '2d',
-     79: '2e',   80: '2f',  219: '30',  221: '31',  220: '43',
-     20: '37',   65: '38',   83: '39',   68: '3a',   70: '3b',
-     71: '3c',   72: '3d',   74: '3e',   75: '3f',   76: '40',
-    186: '41',  222: '42',   13: '55',  160: '49',   90: '4a',
-     88: '4b',   67: '4c',   86: '4d',   66: '4e',   78: '4f',
-     77: '50',  188: '51',  190: '52',  191: '53',  161: '54',
-    162: '5b',   91: '5c',  164: '5d',   32: '5e',  165: '5f',
-     93: '61',  163: '62',   37: '63',   40: '64',   38: '65',
-     39: '66',  144: '20',  111: '21',  106: '22',  109: '7a',
-    107: '7b',  103: '32',  104: '33',  105: '34',  100: '44',
-    101: '45',  102: '46',   97: '56',   98: '57',   99: '58',
-     96: '68',  110: '69',
-}
-
-_reactive_state = ReactiveKeyState()
 
 
 # ── App entry point ───────────────────────────────────────────────────────────
 def main():
-    kb_api = KeyboardAPI()
-    anim_api = AnimationAPI()
+    # Driver already launched and shm already attached at module level
+    # (before webview import, to avoid CEF subprocess conflicts)
 
     # Merge both APIs into a single object for pywebview
     class CombinedAPI(KeyboardAPI, AnimationAPI):
@@ -653,14 +493,19 @@ def main():
         resizable = True,
     )
 
-    # Clean up keyboard on window close
     def on_close():
-        api.disconnect()
-
+        _stop_driver()
     window.events.closed += on_close
 
     webview.start(debug=False)
 
 
 if __name__ == '__main__':
-    main()
+    import traceback
+    try:
+        main()
+    except SystemExit:
+        pass  # normal exit
+    except Exception as e:
+        traceback.print_exc()
+        input('Press Enter to exit...')

@@ -28,7 +28,7 @@ function getLayerSnapshot(layer) {
     if (!layer) return {};
     if (layer.type === 'static') return layer.colors || {};
     if (layer.type === 'reactive') {
-        if (applyLayersActive || (typeof isPlaying !== 'undefined' && isPlaying)) return _getReactiveSnapshot(layer);
+        if (layerViewMode === 'composite') return _getReactiveSnapshot(layer);
         return layer.colors || {};
     }
     const frames = layer.frames || [];
@@ -66,8 +66,13 @@ function _tickReactiveLayers() {
     const now = performance.now();
     layers.forEach(layer => {
         if (layer.type !== 'reactive' || !layer.enabled) return;
+        const maxHold = (layer.fadeDuration || 500) * 3; // force fade after 3x duration if no release
         Object.keys(layer._reactiveColors).forEach(idx => {
             const key = layer._reactiveColors[idx];
+            // Force release if held too long (missed release event)
+            if (key.releaseTime === null && (now - key.pressTime) > maxHold) {
+                key.releaseTime = now;
+            }
             if (key.releaseTime === null) return;
             let alpha;
             if (layer.holdMode === 'instant') {
@@ -82,6 +87,33 @@ function _tickReactiveLayers() {
 }
 
 let _reactiveLastTs = 0;
+let _reactivePollTimer = null;
+const REACTIVE_POLL_MS = 16; // ~60fps, independent of compositor
+
+let _reactiveSynced = false;
+
+function startReactivePoller() {
+    if (_reactivePollTimer) return;
+    _reactiveSynced = false;
+    _reactivePollLoop();
+}
+function stopReactivePoller() {
+    clearTimeout(_reactivePollTimer);
+    _reactivePollTimer = null;
+    _reactiveSynced = false;
+}
+async function _reactivePollLoop() {
+    // Sync config to Python on first run and whenever reactive layers exist
+    if (!_reactiveSynced) {
+        const hasReactive = layers.some(l => l.type === 'reactive' && l.enabled);
+        if (hasReactive) {
+            await _syncReactiveConfig();
+            _reactiveSynced = true;
+        }
+    }
+    await _pollReactiveLayers();
+    _reactivePollTimer = setTimeout(_reactivePollLoop, REACTIVE_POLL_MS);
+}
 
 async function _pollReactiveLayers() {
     if (!hasPyAPI()) return;
@@ -102,46 +134,67 @@ async function _pollReactiveLayers() {
                 const idx = ev.led;
                 if (ev.type === 'press') {
                     const { r, g, b } = layer.colors?.[idx] || defaultColor;
-                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null };
+                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null, pressTime: now };
                 } else if (ev.type === 'release') {
                     if (layer._reactiveColors[idx]) {
                         layer._reactiveColors[idx].releaseTime = now;
+                    } else {
+                        // Key released without a press in our window — start fade immediately
+                        const { r, g, b } = layer.colors?.[idx] || defaultColor;
+                        layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: now, pressTime: now };
                     }
-                }
-            });
-
-            res.held.forEach(idx => {
-                if (!layer._reactiveColors[idx]) {
-                    const { r, g, b } = layer.colors?.[idx] || defaultColor;
-                    layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null };
                 }
             });
         });
     } catch (e) { /* silently ignore poll errors */ }
 }
 
-async function _syncReactiveConfig() { /* no-op in JS-poll mode */ }
+async function _syncReactiveConfig() {
+    if (!hasPyAPI()) return;
+    const reactiveLayers = layers
+        .filter(l => l.type === 'reactive' && l.enabled)
+        .map(l => ({
+            color:        l.color        || {r:255,g:255,b:255},
+            colors:       l.colors       || {},
+            holdMode:     l.holdMode     || 'fade',
+            fadeDuration: l.fadeDuration ?? 500,
+        }));
+    const hasReactive = reactiveLayers.length > 0;
+    try {
+        await window.pywebview.api.update_reactive_config(reactiveLayers, hasReactive);
+    } catch(e) {}
+}
 
 
 function startCompositor() {
     if (compositorTimer) return;
     _compositorTick();
+    startReactivePoller();
 }
 function stopCompositor() {
     clearTimeout(compositorTimer);
     compositorTimer = null;
+    stopReactivePoller();
 }
 function _compositorTick() {
     _tickReactiveLayers();
-    _pollReactiveLayers(); // async, non-blocking
     if (layersPanelOpen) {
         if (layerViewMode === 'composite') {
             const merged = compositeLayers();
             _paintKeyboardFromMap(merged);
-            if (applyLayersActive && hasPyAPI()) {
-                const payload = {};
-                Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
-                window.pywebview.api.apply_frame(payload);
+            if (hasPyAPI()) {
+                const hasReactive = layers.some(l => l.type === 'reactive' && l.enabled);
+                if (hasReactive) {
+                    // Always send base frame to driver so it can overlay reactive on top
+                    const base = compositeLayersExcluding('reactive');
+                    const payload = {};
+                    Object.entries(base).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+                    window.pywebview.api.apply_frame(payload);
+                } else if (applyLayersActive) {
+                    const payload = {};
+                    Object.entries(merged).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+                    window.pywebview.api.apply_frame(payload);
+                }
             }
         } else {
             const layer = getActiveLayer();
@@ -155,7 +208,9 @@ function _compositorTick() {
 // Send a single static frame to hardware — used when not animating
 function _sendStaticSnapshot() {
     if (!hasPyAPI()) return;
-    const map = layerViewMode === 'composite' ? compositeLayers()
+    const hasReactive = layers.some(l => l.type === 'reactive' && l.enabled);
+    const map = layerViewMode === 'composite'
+        ? compositeLayersExcluding(hasReactive ? 'reactive' : null)
         : (() => { const l = getActiveLayer(); return l ? getLayerSnapshot(l) : {}; })();
     const payload = {};
     Object.entries(map).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
@@ -163,6 +218,10 @@ function _sendStaticSnapshot() {
 }
 
 function compositeLayers() {
+    return compositeLayersExcluding(null);
+}
+
+function compositeLayersExcluding(excludeType) {
     // Iterate top (index 0) → bottom (index length-1)
     // result tracks {r,g,b,a} where a is the accumulated coverage (0..1)
     // Standard alpha-over compositing: top layers occlude lower ones
@@ -170,6 +229,7 @@ function compositeLayers() {
     for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         if (!layer.enabled) continue;
+        if (excludeType && layer.type === excludeType) continue;
         const snap = getLayerSnapshot(layer);
         const layerAlpha = layer.opacity / 100;
         Object.entries(snap).forEach(([idx, {r, g, b}]) => {
@@ -208,8 +268,8 @@ function _stopAllPlayback() {
     isPlaying = false;
     clearTimeout(previewTimer);
     _stopAllLayerAnims();
-    // Clear reactive key state
     layers.forEach(l => { if (l.type === 'reactive') l._reactiveColors = {}; });
+    if (typeof _syncReactiveConfig === 'function') _syncReactiveConfig(); // disables Python engine
     if (typeof _syncAllPlayBtns === 'function') _syncAllPlayBtns(false);
 }
 
@@ -382,6 +442,7 @@ function setReactiveColor(hex) {
     const layer = getActiveLayer();
     if (!layer || layer.type !== 'reactive') return;
     layer.color = { r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) };
+    _reactiveSynced = false;
     _syncReactiveConfig();
 }
 
@@ -391,6 +452,7 @@ function setReactiveHoldMode(mode) {
     layer.holdMode = mode;
     layer._reactiveColors = {};
     renderReactiveEffectList(layer);
+    _reactiveSynced = false;
     _syncReactiveConfig();
 }
 
@@ -402,6 +464,7 @@ function setReactiveFadeDuration(ms) {
         const el = document.getElementById(id);
         if (el) el.textContent = ms + 'ms';
     });
+    _reactiveSynced = false;
     _syncReactiveConfig();
 }
 
@@ -586,9 +649,9 @@ function addBlankLayer() {
 function addReactiveLayer() {
     const name = prompt('Layer name:', 'Reactive') || 'Reactive';
     addLayer('reactive', name, {});
-    // Select the new layer and show its controls
     const newLayer = layers[layers.length - 1];
     if (newLayer) selectLayer(newLayer.id);
+    _syncReactiveConfig();
 }
 
 // ── View mode ─────────────────────────────────────────────────────────────────
@@ -979,6 +1042,7 @@ function openLayersPanel() {
     if (typeof stopStaticStream === 'function') stopStaticStream();
     _refreshKeyboard();
     startCompositor();
+    _syncReactiveConfig(); // ensure Python engine knows about reactive layers
 }
 
 function closeLayersPanel() {
