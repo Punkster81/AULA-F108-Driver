@@ -451,6 +451,19 @@
         color: rgba(255, 255, 255, 0.9);
     }
 
+    .key.key-empty {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .key.key-empty::before {
+        display: none;
+    }
+
+    .key.lit.key-black::before {
+        background: #000;
+        opacity: 1;
+    }
+
     .key.unmapped {
         opacity: 0.3;
         cursor: not-allowed;

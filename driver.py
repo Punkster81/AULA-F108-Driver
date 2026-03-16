@@ -19,6 +19,7 @@ import struct
 import ctypes
 import ctypes.wintypes
 import queue
+import random
 import json
 
 # ── Shared memory layout ──────────────────────────────────────────────────────
@@ -47,7 +48,11 @@ KEYS_SIZE   = 4 + 64 * 8 + 4  # +4 for global sequence counter at end
 
 class ShmFrame:
     def __init__(self, create=False):
-        self._shm = _shm_mod.SharedMemory(name=FRAME_SHM, create=create, size=FRAME_SIZE)
+        try:
+            self._shm = _shm_mod.SharedMemory(name=FRAME_SHM, create=create, size=FRAME_SIZE)
+        except FileExistsError:
+            # Stale shm from previous run — reuse it
+            self._shm = _shm_mod.SharedMemory(name=FRAME_SHM, create=False, size=FRAME_SIZE)
         self._buf = self._shm.buf
         self._last_seq = -1
 
@@ -108,7 +113,10 @@ class ShmKeys:
     ENTRY_SIZE = 8
 
     def __init__(self, create=False):
-        self._shm = _shm_mod.SharedMemory(name=KEYS_SHM, create=create, size=KEYS_SIZE)
+        try:
+            self._shm = _shm_mod.SharedMemory(name=KEYS_SHM, create=create, size=KEYS_SIZE)
+        except FileExistsError:
+            self._shm = _shm_mod.SharedMemory(name=KEYS_SHM, create=False, size=KEYS_SIZE)
         self._buf = self._shm.buf
 
     def _read_u32(self, offset):
@@ -210,6 +218,152 @@ def _led_dist(a, b):
     ax, ay = LED_COORDS[a]
     bx, by = LED_COORDS[b]
     return ((ax-bx)**2 + (ay-by)**2) ** 0.5
+
+# ── LED meteor paths: led → [(row_y, nearest_idx), ...] top→bottom ───────────
+# For each target key, the path of nearest keys per row from top down to target.
+LED_METEOR_PATHS = {
+    '01': [(0,'01')],
+    '02': [(0,'02')],
+    '03': [(0,'03')],
+    '04': [(0,'04')],
+    '05': [(0,'05')],
+    '06': [(0,'06')],
+    '07': [(0,'07')],
+    '08': [(0,'08')],
+    '09': [(0,'09')],
+    '0a': [(0,'0a')],
+    '0b': [(0,'0b')],
+    '0c': [(0,'0c')],
+    '0d': [(0,'0d')],
+    '13': [(0,'01'),(1,'13')],
+    '14': [(0,'02'),(1,'14')],
+    '15': [(0,'02'),(1,'15')],
+    '16': [(0,'03'),(1,'16')],
+    '17': [(0,'04'),(1,'17')],
+    '18': [(0,'05'),(1,'18')],
+    '19': [(0,'06'),(1,'19')],
+    '1a': [(0,'07'),(1,'1a')],
+    '1b': [(0,'08'),(1,'1b')],
+    '1c': [(0,'09'),(1,'1c')],
+    '1d': [(0,'0a'),(1,'1d')],
+    '1e': [(0,'0a'),(1,'1e')],
+    '1f': [(0,'0b'),(1,'1f')],
+    '25': [(0,'01'),(1,'13'),(2,'25')],
+    '26': [(0,'02'),(1,'14'),(2,'26')],
+    '27': [(0,'02'),(1,'15'),(2,'27')],
+    '28': [(0,'03'),(1,'16'),(2,'28')],
+    '29': [(0,'04'),(1,'17'),(2,'29')],
+    '2a': [(0,'05'),(1,'18'),(2,'2a')],
+    '2b': [(0,'06'),(1,'19'),(2,'2b')],
+    '2c': [(0,'07'),(1,'1a'),(2,'2c')],
+    '2d': [(0,'08'),(1,'1b'),(2,'2d')],
+    '2e': [(0,'09'),(1,'1c'),(2,'2e')],
+    '2f': [(0,'0a'),(1,'1d'),(2,'2f')],
+    '30': [(0,'0a'),(1,'1e'),(2,'30')],
+    '31': [(0,'0b'),(1,'1f'),(2,'31')],
+    '37': [(0,'01'),(1,'13'),(2,'25'),(3,'37')],
+    '38': [(0,'02'),(1,'14'),(2,'26'),(3,'38')],
+    '39': [(0,'03'),(1,'15'),(2,'27'),(3,'39')],
+    '3a': [(0,'04'),(1,'16'),(2,'28'),(3,'3a')],
+    '3b': [(0,'05'),(1,'17'),(2,'29'),(3,'3b')],
+    '3c': [(0,'05'),(1,'18'),(2,'2a'),(3,'3c')],
+    '3d': [(0,'06'),(1,'19'),(2,'2b'),(3,'3d')],
+    '3e': [(0,'07'),(1,'1a'),(2,'2c'),(3,'3e')],
+    '3f': [(0,'08'),(1,'1b'),(2,'2d'),(3,'3f')],
+    '40': [(0,'09'),(1,'1c'),(2,'2e'),(3,'40')],
+    '41': [(0,'0a'),(1,'1d'),(2,'2f'),(3,'41')],
+    '42': [(0,'0b'),(1,'1e'),(2,'30'),(3,'42')],
+    '43': [(0,'0d'),(1,'67'),(2,'43')],
+    '49': [(0,'01'),(1,'14'),(2,'25'),(3,'37'),(4,'49')],
+    '4a': [(0,'02'),(1,'15'),(2,'27'),(3,'38'),(4,'4a')],
+    '4b': [(0,'03'),(1,'16'),(2,'28'),(3,'39'),(4,'4b')],
+    '4c': [(0,'04'),(1,'17'),(2,'29'),(3,'3a'),(4,'4c')],
+    '4d': [(0,'05'),(1,'18'),(2,'2a'),(3,'3b'),(4,'4d')],
+    '4e': [(0,'06'),(1,'19'),(2,'2b'),(3,'3c'),(4,'4e')],
+    '4f': [(0,'07'),(1,'1a'),(2,'2c'),(3,'3d'),(4,'4f')],
+    '50': [(0,'08'),(1,'1b'),(2,'2d'),(3,'3e'),(4,'50')],
+    '51': [(0,'09'),(1,'1c'),(2,'2e'),(3,'3f'),(4,'51')],
+    '52': [(0,'09'),(1,'1d'),(2,'2f'),(3,'40'),(4,'52')],
+    '53': [(0,'0a'),(1,'1e'),(2,'30'),(3,'41'),(4,'53')],
+    '54': [(0,'0c'),(1,'1f'),(2,'31'),(3,'55'),(4,'54')],
+    '55': [(0,'0c'),(1,'1f'),(2,'31'),(3,'55')],
+    '5b': [(0,'01'),(1,'13'),(2,'25'),(3,'37'),(4,'49'),(5,'5b')],
+    '5c': [(0,'02'),(1,'14'),(2,'26'),(3,'38'),(4,'49'),(5,'5c')],
+    '5d': [(0,'02'),(1,'15'),(2,'27'),(3,'38'),(4,'4a'),(5,'5d')],
+    '5e': [(0,'06'),(1,'18'),(2,'2a'),(3,'3c'),(4,'4e'),(5,'5e')],
+    '5f': [(0,'09'),(1,'1c'),(2,'2e'),(3,'40'),(4,'51'),(5,'5f')],
+    '60': [(0,'0a'),(1,'1d'),(2,'2f'),(3,'41'),(4,'52'),(5,'60')],
+    '61': [(0,'0b'),(1,'1e'),(2,'30'),(3,'42'),(4,'53'),(5,'61')],
+    '62': [(0,'0c'),(1,'1f'),(2,'31'),(3,'55'),(4,'54'),(5,'62')],
+    '63': [(0,'70'),(1,'74'),(2,'77'),(3,'55'),(4,'65'),(5,'63')],
+    '64': [(0,'71'),(1,'75'),(2,'78'),(3,'44'),(4,'65'),(5,'64')],
+    '65': [(0,'71'),(1,'75'),(2,'78'),(3,'44'),(4,'65')],
+    '66': [(0,'73'),(1,'76'),(2,'79'),(3,'44'),(4,'65'),(5,'66')],
+    '67': [(0,'0d'),(1,'67')],
+    '68': [(0,'73'),(1,'20'),(2,'32'),(3,'44'),(4,'56'),(5,'68')],
+    '69': [(0,'73'),(1,'22'),(2,'34'),(3,'46'),(4,'58'),(5,'69')],
+    '6a': [(0,'73'),(1,'7a'),(2,'7b'),(3,'46'),(4,'6a')],
+    '70': [(0,'70')],
+    '71': [(0,'71')],
+    '73': [(0,'73')],
+    '74': [(0,'70'),(1,'74')],
+    '75': [(0,'71'),(1,'75')],
+    '76': [(0,'73'),(1,'76')],
+    '77': [(0,'70'),(1,'74'),(2,'77')],
+    '78': [(0,'71'),(1,'75'),(2,'78')],
+    '79': [(0,'73'),(1,'76'),(2,'79')],
+    '7a': [(0,'73'),(1,'7a')],
+    '7b': [(0,'73'),(1,'7a'),(2,'7b')],
+    '20': [(0,'73'),(1,'20')],
+    '21': [(0,'73'),(1,'21')],
+    '22': [(0,'73'),(1,'22')],
+    '32': [(0,'73'),(1,'20'),(2,'32')],
+    '33': [(0,'73'),(1,'21'),(2,'33')],
+    '34': [(0,'73'),(1,'22'),(2,'34')],
+    '44': [(0,'73'),(1,'20'),(2,'32'),(3,'44')],
+    '45': [(0,'73'),(1,'21'),(2,'33'),(3,'45')],
+    '46': [(0,'73'),(1,'22'),(2,'34'),(3,'46')],
+    '56': [(0,'73'),(1,'20'),(2,'32'),(3,'44'),(4,'56')],
+    '57': [(0,'73'),(1,'21'),(2,'33'),(3,'45'),(4,'57')],
+    '58': [(0,'73'),(1,'22'),(2,'34'),(3,'46'),(4,'58')],
+}
+
+# Top row keys in x order for drift neighbor lookup
+_LED_ROW0 = ['01','02','03','04','05','06','07','08','09','0a','0b','0c','0d','70','71','73']
+
+# Rows grouped by y
+_LED_ROWS = {}
+for _idx, (_x, _y) in LED_COORDS.items():
+    _LED_ROWS.setdefault(_y, []).append((_x, _idx))
+for _r in _LED_ROWS:
+    _LED_ROWS[_r].sort()
+
+def _get_drifted_path(target_led, drift=0):
+    """Build a meteor path that starts from a neighbor in the top row (drift=±1)."""
+    if target_led not in LED_COORDS:
+        return []
+    base_path = LED_METEOR_PATHS.get(target_led, [])
+    if not base_path:
+        return []
+    base_start = base_path[0][1]
+    try:
+        i = _LED_ROW0.index(base_start)
+        start_key = _LED_ROW0[max(0, min(len(_LED_ROW0)-1, i + drift))]
+    except ValueError:
+        start_key = base_start
+    sx = LED_COORDS[start_key][0]
+    tx, ty = LED_COORDS[target_led]
+    path = [(0, start_key)]
+    for ry in sorted(_LED_ROWS.keys()):
+        if ry == 0:
+            continue
+        if ry > ty:
+            break
+        progress = ry / ty if ty > 0 else 1.0
+        lerp_x = sx + (tx - sx) * progress
+        closest = min(_LED_ROWS[ry], key=lambda k: abs(k[0] - lerp_x))
+        path.append((ry, closest[1]))
+    return path
 
 # ── VK → LED map ──────────────────────────────────────────────────────────────
 VK_TO_LED = {
@@ -335,7 +489,7 @@ class Driver:
                 if i < len(self._reactive_layers) and self._reactive_layers[i]['cfg'].get('effect') == effect:
                     existing = self._reactive_layers[i]['active']
                 else:
-                    existing = [] if effect == 'ripple' else {}
+                    existing = [] if effect in ('ripple', 'meteor', 'lightning') else {}
                 new_layers.append({'cfg': cfg, 'active': existing})
             self._reactive_layers = new_layers
 
@@ -352,6 +506,10 @@ class Driver:
 
                 if effect == 'ripple':
                     self._apply_ripple(frame, active, cfg, now, opacity)
+                elif effect == 'meteor':
+                    self._apply_meteor(frame, active, cfg, now, opacity)
+                elif effect == 'lightning':
+                    self._apply_lightning(frame, active, cfg, now, opacity)
                 else:
                     self._apply_highlight(frame, active, cfg, now, opacity)
 
@@ -417,6 +575,93 @@ class Driver:
         for i in reversed(to_del):
             active.pop(i)
 
+    def _apply_meteor(self, frame, active, cfg, now, opacity):
+        """Meteor falls down column to target key, trail behind, impact glow."""
+        fall_s  = cfg.get('fallDuration', 300) / 1000.0
+        trail   = cfg.get('trailLength',  1.5)   # number of path steps that trail
+        sit_s   = cfg.get('sitDuration',  200) / 1000.0
+        fade_s  = cfg.get('fadeDuration', 400) / 1000.0
+
+        to_del = []
+        for i, meteor in enumerate(active):
+            elapsed = now - meteor['press_ts']
+            full_path = meteor.get('path') or LED_METEOR_PATHS.get(meteor['target'], [])
+            if not full_path:
+                full_path = LED_METEOR_PATHS.get(meteor['target'], [])
+            start_offset = meteor.get('start_offset', 0)
+            path    = full_path[start_offset:]
+            if not path:
+                to_del.append(i); continue
+
+            n_steps = len(path)  # number of keys in path including target
+            landed  = elapsed >= fall_s
+
+            r, g, b = meteor['r'], meteor['g'], meteor['b']
+
+            if landed:
+                post = elapsed - fall_s
+                if post < sit_s:
+                    impact_alpha = 1.0
+                else:
+                    impact_alpha = max(0.0, 1.0 - (post - sit_s) / max(fade_s, 0.001))
+                if impact_alpha <= 0:
+                    to_del.append(i); continue
+                # Only the target key glows
+                target = meteor['target']
+                a = impact_alpha * opacity
+                cur = frame.get(target, [0,0,0])
+                cr,cg,cb = cur if isinstance(cur,(list,tuple)) else [cur.get('r',0),cur.get('g',0),cur.get('b',0)]
+                frame[target] = [
+                    min(255, int(r*a + cr*(1-a))),
+                    min(255, int(g*a + cg*(1-a))),
+                    min(255, int(b*a + cb*(1-a))),
+                ]
+            else:
+                # Head position as a fractional step index (0 = top, n_steps-1 = target)
+                head_step = (n_steps - 1) * (elapsed / max(fall_s, 0.001))
+
+                for step_i, (_, key_idx) in enumerate(path):
+                    # Distance behind head (positive = above head = in trail)
+                    dist = head_step - step_i
+                    if dist < 0 or dist > trail:
+                        continue
+                    # Head is brightest, trail fades linearly
+                    trail_alpha = (1.0 - dist / trail) * opacity
+                    if trail_alpha <= 0:
+                        continue
+                    cur = frame.get(key_idx, [0,0,0])
+                    cr,cg,cb = cur if isinstance(cur,(list,tuple)) else [cur.get('r',0),cur.get('g',0),cur.get('b',0)]
+                    frame[key_idx] = [
+                        min(255, int(r*trail_alpha + cr*(1-trail_alpha))),
+                        min(255, int(g*trail_alpha + cg*(1-trail_alpha))),
+                        min(255, int(b*trail_alpha + cb*(1-trail_alpha))),
+                    ]
+
+        for i in reversed(to_del):
+            active.pop(i)
+
+    def _apply_lightning(self, frame, active, cfg, now, opacity):
+        """Instant flash of entire column, fades together."""
+        fade_s = cfg.get('fadeDuration', 400) / 1000.0
+        to_del = []
+        for i, bolt in enumerate(active):
+            elapsed = now - bolt['press_ts']
+            fade_alpha = max(0.0, 1.0 - elapsed / max(fade_s, 0.001))
+            if fade_alpha <= 0:
+                to_del.append(i); continue
+            a = fade_alpha * opacity
+            path = bolt.get('path') or LED_METEOR_PATHS.get(bolt['target'], [])
+            for _, key_idx in path:
+                cur = frame.get(key_idx, [0,0,0])
+                cr,cg,cb = cur if isinstance(cur,(list,tuple)) else [cur.get('r',0),cur.get('g',0),cur.get('b',0)]
+                frame[key_idx] = [
+                    min(255, int(bolt['r']*a + cr*(1-a))),
+                    min(255, int(bolt['g']*a + cg*(1-a))),
+                    min(255, int(bolt['b']*a + cb*(1-a))),
+                ]
+        for i in reversed(to_del):
+            active.pop(i)
+
     def _on_key_event(self, led, kind):
         """Called from hook thread."""
         # Write to shm keys ring for UI display
@@ -436,15 +681,18 @@ class Driver:
                 per_key = cfg.get('colors', {})
                 c = per_key.get(led)
                 if c is None:
-                    # No color assigned to this key — skip ripple
-                    if effect == 'ripple':
+                    # No color painted on this key — skip for all reactive effects
+                    if effect in ('ripple', 'meteor', 'lightning'):
                         if kind == 'release':
-                            for ripple in reversed(active):
-                                if ripple['origin'] == led and ripple['release_ts'] is None:
-                                    ripple['release_ts'] = now
+                            for entry in reversed(active):
+                                key_field = 'origin' if effect == 'ripple' else 'target'
+                                if entry[key_field] == led and entry['release_ts'] is None:
+                                    entry['release_ts'] = now
                                     break
-                        continue
-                    c = cfg.get('color', {'r':255,'g':255,'b':255})
+                    elif effect == 'highlight':
+                        if kind == 'release' and led in active:
+                            active[led]['release_ts'] = now
+                    continue
                 if isinstance(c, (list, tuple)):
                     r, g, b = int(c[0]), int(c[1]), int(c[2])
                 else:
@@ -463,11 +711,35 @@ class Driver:
                         active.append({'origin': led, 'r':r,'g':g,'b':b,
                                        'press_ts': now, 'release_ts': None})
                     elif kind == 'release':
-                        # Mark the most recent unfinished ripple from this key
                         for ripple in reversed(active):
                             if ripple['origin'] == led and ripple['release_ts'] is None:
                                 ripple['release_ts'] = now
                                 break
+                elif effect == 'meteor':
+                    if kind == 'press':
+                        hold_mode = cfg.get('rippleHoldMode', 'once')
+                        if hold_mode == 'once':
+                            already_held = any(
+                                m['target'] == led and not (now - m['press_ts'] >= cfg.get('fallDuration',300)/1000.0 + cfg.get('sitDuration',200)/1000.0)
+                                for m in active
+                            )
+                            if already_held:
+                                continue
+                        path = LED_METEOR_PATHS.get(led, [])
+                        start_offset = random.randint(0, min(2, max(0, len(path)-2))) if len(path) > 2 else 0
+                        drift = random.randint(-1, 1)
+                        drifted = _get_drifted_path(led, drift)
+                        active.append({'target': led, 'r':r,'g':g,'b':b,
+                                       'press_ts': now, 'release_ts': None,
+                                       'start_offset': 0, 'path': drifted or path})
+                    # meteor doesn't use release_ts for anything yet
+                elif effect == 'lightning':
+                    if kind == 'press':
+                        drift = random.randint(-1, 1)
+                        drifted = _get_drifted_path(led, drift)
+                        path = drifted if drifted else LED_METEOR_PATHS.get(led, [])
+                        active.append({'target': led, 'r':r,'g':g,'b':b,
+                                       'press_ts': now, 'path': path})
                 else:
                     # active is a dict — one entry per key
                     if kind == 'press':
@@ -516,7 +788,9 @@ class Driver:
 
         def _resolve_led(vk, extended):
             if vk == 13: return '6a' if extended else '55'
-            if not (user32.GetKeyState(144) & 1) and vk in NUMPAD_NUMLOCK_OFF:
+            # NumLock-off remapping only applies to non-extended keys (real numpad)
+            # Arrow keys are always extended=True — don't remap them
+            if not extended and not (user32.GetKeyState(144) & 1) and vk in NUMPAD_NUMLOCK_OFF:
                 return NUMPAD_NUMLOCK_OFF[vk]
             return VK_TO_LED.get(vk)
 

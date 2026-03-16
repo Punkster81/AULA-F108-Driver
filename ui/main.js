@@ -55,7 +55,7 @@ const modes = {
             updateFooter();
         },
         onClearAll() {
-            Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
+            Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; unpaintKey(idx); });
             updateFooter();
             toast('Cleared all keys');
         },
@@ -332,15 +332,20 @@ function applyColorToSelected() {
 function paintKey(idx, r, g, b) {
     const k = keyEls[idx];
     if (!k) return;
-    if (r === 0 && g === 0 && b === 0) {
-        k.style.setProperty('--key-color', 'transparent');
-        k.classList.remove('lit'); k.style.color = '';
-    } else {
-        const brightness = Math.sqrt(0.299*r*r + 0.587*g*g + 0.114*b*b) / 255;
-        k.style.setProperty('--key-color', `rgb(${r},${g},${b})`);
-        k.classList.add('lit');
-        k.style.color = brightness > 0.5 ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
-    }
+    const brightness = Math.sqrt(0.299*r*r + 0.587*g*g + 0.114*b*b) / 255;
+    k.style.setProperty('--key-color', `rgb(${r},${g},${b})`);
+    k.classList.add('lit');
+    k.classList.remove('key-empty');
+    k.style.color = brightness > 0.4 ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
+}
+
+function unpaintKey(idx) {
+    const k = keyEls[idx];
+    if (!k) return;
+    k.style.setProperty('--key-color', 'transparent');
+    k.classList.remove('lit');
+    k.classList.add('key-empty');
+    k.style.color = '';
 }
 
 function clearAll() { activeMode.onClearAll(); }
@@ -425,12 +430,12 @@ async function restoreLastLighting() {
     const la = await window.pywebview.api.list_animations();
     if (la.ok && la.animations.length > 0) { loadAnimationData(la.animations[0]); openAnimPanel(); setAsActiveAnimation(); return; }
 
-    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
+    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; unpaintKey(idx); });
     updateFooter();
 }
 
 function applyStaticColorMap(colors) {
-    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; paintKey(idx, 0, 0, 0); });
+    Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; unpaintKey(idx); });
     Object.entries(colors).forEach(([idx, rgb]) => {
         const [rv, gv, bv] = Array.isArray(rgb) ? rgb : [rgb.r, rgb.g, rgb.b];
         keyColors[idx] = { r: rv, g: gv, b: bv }; paintKey(idx, rv, gv, bv);

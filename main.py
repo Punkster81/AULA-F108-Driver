@@ -23,35 +23,12 @@ def _launch_driver_early():
     import ctypes
     driver_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'driver.py')
 
-    # Check if already running as admin
-    try:
-        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        is_admin = False
-
-    if is_admin:
-        # Already admin — spawn directly
-        _driver_proc = _subprocess.Popen(
-            [sys.executable, driver_script],
-            stdin=_subprocess.DEVNULL,
-            creationflags=getattr(_subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
-        )
-    else:
-        # Request elevation via UAC — ShellExecuteW with 'runas'
-        import ctypes.wintypes
-        ret = ctypes.windll.shell32.ShellExecuteW(
-            None, 'runas', sys.executable, f'"{driver_script}"', None, 0
-        )
-        if ret <= 32:
-            print(f'[ui] ShellExecuteW failed ({ret}), trying direct launch', flush=True)
-            _driver_proc = _subprocess.Popen(
-                [sys.executable, driver_script],
-                stdin=_subprocess.DEVNULL,
-            )
-        else:
-            print('[ui] Driver launched with admin elevation', flush=True)
-            # ShellExecuteW doesn't give us a Popen handle — use a sentinel
-            _driver_proc = type('FakePopen', (), {'poll': lambda self: None})()
+    # Always spawn driver directly — main.py self-elevates at startup if needed
+    _driver_proc = _subprocess.Popen(
+        [sys.executable, driver_script],
+        stdin=_subprocess.DEVNULL,
+        creationflags=getattr(_subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+    )
 
     import time as _t; _t.sleep(1.2)
     try:
@@ -62,7 +39,38 @@ def _launch_driver_early():
     except Exception as e:
         print(f'[ui] shm attach failed: {e}', flush=True)
 
-_launch_driver_early()
+    import time as _t; _t.sleep(1.2)
+    try:
+        from driver import ShmFrame, ShmKeys
+        _shm_frame = ShmFrame(create=False)
+        _shm_keys  = ShmKeys(create=False)
+        print('[ui] Attached to driver shared memory', flush=True)
+    except Exception as e:
+        print(f'[ui] shm attach failed: {e}', flush=True)
+
+# ── Self-elevate if needed, then launch driver ────────────────────────────────
+if __name__ == '__main__':
+    try:
+        import ctypes as _ctypes
+        if not _ctypes.windll.shell32.IsUserAnAdmin():
+            # Relaunch self as admin and exit this non-admin instance immediately
+            # Don't launch the driver yet — the elevated instance will do it
+            script = os.path.abspath(__file__)
+            params = ' '.join(f'"{a}"' for a in sys.argv[1:])
+            ret = _ctypes.windll.shell32.ShellExecuteW(
+                None, 'runas', sys.executable, f'"{script}" {params}', None, 1
+            )
+            if ret > 32:
+                sys.exit(0)  # elevated copy launched, we're done
+    except Exception as _e:
+        print(f'[ui] elevation check failed: {_e}', flush=True)
+
+    # Only reach here if already admin (or elevation failed)
+    try:
+        _launch_driver_early()
+    except Exception as _e:
+        print(f'[ui] driver launch failed: {_e}', flush=True)
+        import traceback; traceback.print_exc()
 
 import webview
 _STARTUP_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -125,7 +133,6 @@ def _stop_driver():
     global _driver_proc
     _send_driver_cmd('STOP')
     if _driver_proc and hasattr(_driver_proc, 'terminate'):
-        import time as _t; _t.sleep(0.5)
         try: _driver_proc.terminate()
         except: pass
     _driver_proc = None
@@ -493,8 +500,13 @@ def main():
         resizable = True,
     )
 
+    import atexit
+    atexit.register(_stop_driver)
+
     def on_close():
-        _stop_driver()
+        # Don't block here — .NET FormClosed callback must return immediately
+        # Driver cleanup happens via atexit when Python process exits
+        threading.Thread(target=_stop_driver, daemon=True).start()
     window.events.closed += on_close
 
     webview.start(debug=False)
@@ -505,7 +517,10 @@ if __name__ == '__main__':
     try:
         main()
     except SystemExit:
-        pass  # normal exit
+        pass
     except Exception as e:
+        traceback.print_exc()
+        input('Press Enter to exit...')
+    except BaseException as e:
         traceback.print_exc()
         input('Press Enter to exit...')

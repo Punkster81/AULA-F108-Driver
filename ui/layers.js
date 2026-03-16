@@ -28,8 +28,7 @@ function getLayerSnapshot(layer) {
     if (!layer) return {};
     if (layer.type === 'static') return layer.colors || {};
     if (layer.type === 'reactive') {
-        if (layerViewMode === 'composite') return _getReactiveSnapshot(layer);
-        return layer.colors || {};
+        return _getReactiveSnapshot(layer);
     }
     const frames = layer.frames || [];
     if (!frames.length) return {};
@@ -76,6 +75,8 @@ function _ledDist(a, b) {
 
 function _getReactiveSnapshot(layer) {
     if (layer.effect === 'ripple') return _getRippleSnapshot(layer);
+    if (layer.effect === 'meteor') return _getMeteorSnapshot(layer);
+    if (layer.effect === 'lightning') return _getLightningSnapshot(layer);
     const out = {};
     const now = performance.now();
     Object.entries(layer._reactiveColors || {}).forEach(([idx, key]) => {
@@ -133,6 +134,183 @@ function _getRippleSnapshot(layer) {
     return out;
 }
 
+// ── LED meteor paths (mirrors driver.py LED_METEOR_PATHS) ────────────────────
+const LED_METEOR_PATHS = {
+    '01':[(0,'01')],'02':[(0,'02')],'03':[(0,'03')],'04':[(0,'04')],'05':[(0,'05')],
+    '06':[(0,'06')],'07':[(0,'07')],'08':[(0,'08')],'09':[(0,'09')],
+    '0a':[(0,'0a')],'0b':[(0,'0b')],'0c':[(0,'0c')],'0d':[(0,'0d')],
+    '13':[(0,'01'),(1,'13')],'14':[(0,'02'),(1,'14')],'15':[(0,'02'),(1,'15')],
+    '16':[(0,'03'),(1,'16')],'17':[(0,'04'),(1,'17')],'18':[(0,'05'),(1,'18')],
+    '19':[(0,'06'),(1,'19')],'1a':[(0,'07'),(1,'1a')],'1b':[(0,'08'),(1,'1b')],
+    '1c':[(0,'09'),(1,'1c')],'1d':[(0,'0a'),(1,'1d')],'1e':[(0,'0a'),(1,'1e')],
+    '1f':[(0,'0b'),(1,'1f')],
+    '25':[(0,'01'),(1,'13'),(2,'25')],'26':[(0,'02'),(1,'14'),(2,'26')],
+    '27':[(0,'02'),(1,'15'),(2,'27')],'28':[(0,'03'),(1,'16'),(2,'28')],
+    '29':[(0,'04'),(1,'17'),(2,'29')],'2a':[(0,'05'),(1,'18'),(2,'2a')],
+    '2b':[(0,'06'),(1,'19'),(2,'2b')],'2c':[(0,'07'),(1,'1a'),(2,'2c')],
+    '2d':[(0,'08'),(1,'1b'),(2,'2d')],'2e':[(0,'09'),(1,'1c'),(2,'2e')],
+    '2f':[(0,'0a'),(1,'1d'),(2,'2f')],'30':[(0,'0a'),(1,'1e'),(2,'30')],
+    '31':[(0,'0b'),(1,'1f'),(2,'31')],'43':[(0,'0d'),(1,'67'),(2,'43')],
+    '37':[(0,'01'),(1,'13'),(2,'25'),(3,'37')],'38':[(0,'02'),(1,'14'),(2,'26'),(3,'38')],
+    '39':[(0,'03'),(1,'15'),(2,'27'),(3,'39')],'3a':[(0,'04'),(1,'16'),(2,'28'),(3,'3a')],
+    '3b':[(0,'05'),(1,'17'),(2,'29'),(3,'3b')],'3c':[(0,'05'),(1,'18'),(2,'2a'),(3,'3c')],
+    '3d':[(0,'06'),(1,'19'),(2,'2b'),(3,'3d')],'3e':[(0,'07'),(1,'1a'),(2,'2c'),(3,'3e')],
+    '3f':[(0,'08'),(1,'1b'),(2,'2d'),(3,'3f')],'40':[(0,'09'),(1,'1c'),(2,'2e'),(3,'40')],
+    '41':[(0,'0a'),(1,'1d'),(2,'2f'),(3,'41')],'42':[(0,'0b'),(1,'1e'),(2,'30'),(3,'42')],
+    '55':[(0,'0c'),(1,'1f'),(2,'31'),(3,'55')],
+    '49':[(0,'01'),(1,'14'),(2,'25'),(3,'37'),(4,'49')],
+    '4a':[(0,'02'),(1,'15'),(2,'27'),(3,'38'),(4,'4a')],
+    '4b':[(0,'03'),(1,'16'),(2,'28'),(3,'39'),(4,'4b')],
+    '4c':[(0,'04'),(1,'17'),(2,'29'),(3,'3a'),(4,'4c')],
+    '4d':[(0,'05'),(1,'18'),(2,'2a'),(3,'3b'),(4,'4d')],
+    '4e':[(0,'06'),(1,'19'),(2,'2b'),(3,'3c'),(4,'4e')],
+    '4f':[(0,'07'),(1,'1a'),(2,'2c'),(3,'3d'),(4,'4f')],
+    '50':[(0,'08'),(1,'1b'),(2,'2d'),(3,'3e'),(4,'50')],
+    '51':[(0,'09'),(1,'1c'),(2,'2e'),(3,'3f'),(4,'51')],
+    '52':[(0,'09'),(1,'1d'),(2,'2f'),(3,'40'),(4,'52')],
+    '53':[(0,'0a'),(1,'1e'),(2,'30'),(3,'41'),(4,'53')],
+    '54':[(0,'0c'),(1,'1f'),(2,'31'),(3,'55'),(4,'54')],
+    '5b':[(0,'01'),(1,'13'),(2,'25'),(3,'37'),(4,'49'),(5,'5b')],
+    '5c':[(0,'02'),(1,'14'),(2,'26'),(3,'38'),(4,'49'),(5,'5c')],
+    '5d':[(0,'02'),(1,'15'),(2,'27'),(3,'38'),(4,'4a'),(5,'5d')],
+    '5e':[(0,'06'),(1,'18'),(2,'2a'),(3,'3c'),(4,'4e'),(5,'5e')],
+    '5f':[(0,'09'),(1,'1c'),(2,'2e'),(3,'40'),(4,'51'),(5,'5f')],
+    '60':[(0,'0a'),(1,'1d'),(2,'2f'),(3,'41'),(4,'52'),(5,'60')],
+    '61':[(0,'0b'),(1,'1e'),(2,'30'),(3,'42'),(4,'53'),(5,'61')],
+    '62':[(0,'0c'),(1,'1f'),(2,'31'),(3,'55'),(4,'54'),(5,'62')],
+    '63':[(0,'70'),(1,'74'),(2,'77'),(3,'55'),(4,'65'),(5,'63')],
+    '64':[(0,'71'),(1,'75'),(2,'78'),(3,'44'),(4,'65'),(5,'64')],
+    '65':[(0,'71'),(1,'75'),(2,'78'),(3,'44'),(4,'65')],
+    '66':[(0,'73'),(1,'76'),(2,'79'),(3,'44'),(4,'65'),(5,'66')],
+    '67':[(0,'0d'),(1,'67')],
+    '68':[(0,'73'),(1,'20'),(2,'32'),(3,'44'),(4,'56'),(5,'68')],
+    '69':[(0,'73'),(1,'22'),(2,'34'),(3,'46'),(4,'58'),(5,'69')],
+    '6a':[(0,'73'),(1,'7a'),(2,'7b'),(3,'46'),(4,'6a')],
+    '70':[(0,'70')],'71':[(0,'71')],'73':[(0,'73')],
+    '74':[(0,'70'),(1,'74')],'75':[(0,'71'),(1,'75')],'76':[(0,'73'),(1,'76')],
+    '77':[(0,'70'),(1,'74'),(2,'77')],'78':[(0,'71'),(1,'75'),(2,'78')],
+    '79':[(0,'73'),(1,'76'),(2,'79')],
+    '7a':[(0,'73'),(1,'7a')],'7b':[(0,'73'),(1,'7a'),(2,'7b')],
+    '20':[(0,'73'),(1,'20')],'21':[(0,'73'),(1,'21')],'22':[(0,'73'),(1,'22')],
+    '32':[(0,'73'),(1,'20'),(2,'32')],'33':[(0,'73'),(1,'21'),(2,'33')],
+    '34':[(0,'73'),(1,'22'),(2,'34')],
+    '44':[(0,'73'),(1,'20'),(2,'32'),(3,'44')],'45':[(0,'73'),(1,'21'),(2,'33'),(3,'45')],
+    '46':[(0,'73'),(1,'22'),(2,'34'),(3,'46')],
+    '56':[(0,'73'),(1,'20'),(2,'32'),(3,'44'),(4,'56')],
+    '57':[(0,'73'),(1,'21'),(2,'33'),(3,'45'),(4,'57')],
+    '58':[(0,'73'),(1,'22'),(2,'34'),(3,'46'),(4,'58')],
+};
+
+// Top row keys in x order for drift
+const _LED_ROW0 = ['01','02','03','04','05','06','07','08','09','0a','0b','0c','0d','70','71','73'];
+
+// Rows grouped by y
+const _LED_ROWS = {};
+Object.entries(LED_COORDS).forEach(([idx,[x,y]]) => {
+    if (!_LED_ROWS[y]) _LED_ROWS[y] = [];
+    _LED_ROWS[y].push([x, idx]);
+});
+Object.values(_LED_ROWS).forEach(r => r.sort((a,b) => a[0]-b[0]));
+
+function _getDriftedMeteorPath(targetLed, drift) {
+    const basePath = LED_METEOR_PATHS[targetLed];
+    if (!basePath) return [];
+    const baseStart = basePath[0][1];
+    const i = _LED_ROW0.indexOf(baseStart);
+    if (i === -1) return basePath; // start not in top row — use default path
+    const startKey = _LED_ROW0[Math.max(0, Math.min(_LED_ROW0.length-1, i + drift))] || baseStart;
+    const sc = LED_COORDS[startKey], tc = LED_COORDS[targetLed];
+    if (!sc || !tc) return basePath;
+    const sx = sc[0], tx = tc[0], ty = tc[1];
+    const path = [[0, startKey]];
+    const sortedRows = Object.keys(_LED_ROWS).map(Number).sort((a,b)=>a-b);
+    for (const ry of sortedRows) {
+        if (ry === 0 || ry > ty) continue;
+        const progress = ry / ty;
+        const lerpX = sx + (tx - sx) * progress;
+        const closest = _LED_ROWS[ry].reduce((a,b) => Math.abs(a[0]-lerpX) < Math.abs(b[0]-lerpX) ? a : b);
+        path.push([ry, closest[1]]);
+    }
+    return path;
+}
+
+function _getLightningSnapshot(layer) {
+    const out = {};
+    const now = performance.now();
+    const fadeMs = layer.fadeDuration ?? 400;
+
+    (layer._ripples || []).forEach(bolt => {
+        const elapsed = now - bolt.pressTime;
+        const alpha = Math.max(0, 1.0 - elapsed / fadeMs);
+        if (alpha <= 0) return;
+
+        const path = (bolt.path && bolt.path.length) ? bolt.path : LED_METEOR_PATHS[bolt.origin];
+        if (!path) return;
+
+        const c = bolt.color || {r:255,g:255,b:255};
+        const mr = c.r ?? c[0] ?? 255;
+        const mg = c.g ?? c[1] ?? 255;
+        const mb = c.b ?? c[2] ?? 255;
+
+        path.forEach(([, keyIdx]) => {
+            const cur = out[keyIdx] || {r:0,g:0,b:0};
+            out[keyIdx] = {
+                r: Math.min(255, Math.round(mr*alpha + cur.r*(1-alpha))),
+                g: Math.min(255, Math.round(mg*alpha + cur.g*(1-alpha))),
+                b: Math.min(255, Math.round(mb*alpha + cur.b*(1-alpha))),
+            };
+        });
+    });
+    return out;
+}
+
+function _getMeteorSnapshot(layer) {
+    const out = {};
+    const now = performance.now();
+    const fallMs  = layer.fallDuration ?? 1500;
+    const sitMs   = layer.sitDuration  ?? 200;
+    const fadeMs  = layer.fadeDuration ?? 400;
+    const trail   = layer.trailLength  ?? 1.5;
+
+    (layer._ripples || []).forEach(meteor => {
+        const elapsed = now - meteor.pressTime;
+        const path = (meteor.path && meteor.path.length) ? meteor.path : LED_METEOR_PATHS[meteor.origin];
+        if (!path || !path.length) return;
+        const nSteps = path.length;
+        const c = meteor.color || {r:255,g:0,b:0};
+        const mr = c.r ?? c[0] ?? 255;
+        const mg = c.g ?? c[1] ?? 0;
+        const mb = c.b ?? c[2] ?? 0;
+
+        const blend = (idx, alpha) => {
+            const cur = out[idx] || {r:0,g:0,b:0};
+            out[idx] = {
+                r: Math.min(255, Math.round(mr*alpha + cur.r*(1-alpha))),
+                g: Math.min(255, Math.round(mg*alpha + cur.g*(1-alpha))),
+                b: Math.min(255, Math.round(mb*alpha + cur.b*(1-alpha))),
+            };
+        };
+
+        const landed = elapsed >= fallMs;
+        if (landed) {
+            const post = elapsed - fallMs;
+            const impactAlpha = post < sitMs ? 1.0
+                : Math.max(0, 1 - (post - sitMs) / fadeMs);
+            if (impactAlpha > 0) blend(meteor.origin, impactAlpha);
+        } else {
+            // Light up ALL path keys above current position
+            const headStep = (nSteps - 1) * (elapsed / fallMs);
+            path.forEach(([, keyIdx], stepI) => {
+                if (stepI > headStep) return;
+                const dist = headStep - stepI;
+                if (dist > trail) return;
+                blend(keyIdx, Math.max(0, 1.0 - dist / Math.max(trail, 0.1)));
+            });
+        }
+    });
+    return out;
+}
+
 function _tickReactiveLayers() {
     const now = performance.now();
     layers.forEach(layer => {
@@ -144,6 +322,12 @@ function _tickReactiveLayers() {
                 if (rip.releaseTime === null) return true;
                 return (now - rip.releaseTime) < fadeMs;
             });
+        } else if (layer.effect === 'meteor') {
+            const totalMs = (layer.fallDuration ?? 1500) + (layer.sitDuration ?? 200) + (layer.fadeDuration ?? 400);
+            layer._ripples = (layer._ripples || []).filter(rip => (now - rip.pressTime) < totalMs);
+        } else if (layer.effect === 'lightning') {
+            const fadeMs = layer.fadeDuration ?? 400;
+            layer._ripples = (layer._ripples || []).filter(rip => (now - rip.pressTime) < fadeMs);
         } else {
             const maxHold = (layer.fadeDuration || 500) * 3;
             Object.keys(layer._reactiveColors).forEach(idx => {
@@ -209,13 +393,13 @@ async function _pollReactiveLayers() {
             if (layer.type !== 'reactive' || !layer.enabled) return;
             const defaultColor = layer.color;
 
-            if (layer.effect === 'ripple') {
+            if (layer.effect === 'ripple' || layer.effect === 'meteor' || layer.effect === 'lightning') {
                 if (!layer._ripples) layer._ripples = [];
                 res.events.forEach(ev => {
                     const idx = ev.led;
                     const perKey = layer.colors?.[idx];
-                    // For ripple: only fire if key has an explicit color painted
-                    if (layer.effect === 'ripple' && !perKey) {
+                    // Only fire if key has an explicit per-key color painted — no global fallback
+                    if (!perKey) {
                         if (ev.type === 'release') {
                             for (let i = layer._ripples.length - 1; i >= 0; i--) {
                                 if (layer._ripples[i].origin === idx && layer._ripples[i].releaseTime === null) {
@@ -225,13 +409,28 @@ async function _pollReactiveLayers() {
                         }
                         return;
                     }
-                    const c = perKey || defaultColor;  // per-key or global color
+                    const c = perKey;  // per-key color only
                     if (ev.type === 'press') {
-                        // Only add if not already held (one-per-press mode default)
-                        const alreadyHeld = layer.rippleHoldMode !== 'continuous' &&
-                            layer._ripples.some(r => r.origin === idx && r.releaseTime === null);
-                        if (!alreadyHeld) {
-                            layer._ripples.push({ origin: idx, color: c, pressTime: now, releaseTime: null });
+                        if (layer.effect === 'lightning') {
+                            const holdMode = layer.lightningHoldMode || 'once';
+                            const alreadyActive = holdMode !== 'continuous' &&
+                                layer._ripples.some(r => r.origin === idx && (now - r.pressTime) < (layer.fadeDuration ?? 400));
+                            if (!alreadyActive) {
+                                const drift = Math.floor(Math.random() * 3) - 1;
+                                const path = _getDriftedMeteorPath(idx, drift);
+                                layer._ripples.push({ origin: idx, color: c, pressTime: now, path });
+                                if (layersPanelOpen) requestAnimationFrame(() => _refreshKeyboard());
+                            }
+                        } else {
+                            // ripple / meteor
+                            const alreadyHeld = layer.rippleHoldMode !== 'continuous' &&
+                                layer._ripples.some(r => r.origin === idx && r.releaseTime === null);
+                            if (!alreadyHeld) {
+                                const drift = Math.floor(Math.random() * 3) - 1;
+                                const driftedPath = _getDriftedMeteorPath(idx, drift);
+                                layer._ripples.push({ origin: idx, color: c, pressTime: now, releaseTime: null, path: driftedPath });
+                                if (layersPanelOpen) requestAnimationFrame(() => _refreshKeyboard());
+                            }
                         }
                     } else if (ev.type === 'release') {
                         // Mark most recent unfinished ripple from this key
@@ -246,20 +445,31 @@ async function _pollReactiveLayers() {
             } else {
                 res.events.forEach(ev => {
                     const idx = ev.led;
+                    const perKeyHL = layer.colors?.[idx];
+                    if (!perKeyHL) return;  // no color painted — skip
+                    const { r, g, b } = perKeyHL;
                     if (ev.type === 'press') {
-                        const { r, g, b } = layer.colors?.[idx] || defaultColor;
                         layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: null, pressTime: now };
                     } else if (ev.type === 'release') {
                         if (layer._reactiveColors[idx]) {
                             layer._reactiveColors[idx].releaseTime = now;
                         } else {
-                            const { r, g, b } = layer.colors?.[idx] || defaultColor;
                             layer._reactiveColors[idx] = { r, g, b, alpha: 1, releaseTime: now, pressTime: now };
                         }
                     }
                 });
             }
         });
+
+        // Force immediate repaint if any meteor/ripple animations are in flight
+        const hasAnimating = layers.some(l =>
+            l.type === 'reactive' && l.enabled &&
+            (l.effect === 'meteor' || l.effect === 'ripple' || l.effect === 'lightning') &&
+            (l._ripples?.length > 0)
+        );
+        if (hasAnimating && layersPanelOpen) {
+            _refreshKeyboard();
+        }
     } catch (e) { /* silently ignore poll errors */ }
 }
 
@@ -272,13 +482,17 @@ async function _syncReactiveConfig() {
             color:        l.color        || {r:255,g:255,b:255},
             colors:       l.colors       || {},
             holdMode:     l.holdMode     || 'fade',
-            fadeDuration: l.fadeDuration ?? (l.effect === 'ripple' ? 1500 : 500),
+            fadeDuration: l.fadeDuration ?? (l.effect === 'ripple' ? 1500 : l.effect === 'meteor' ? 400 : 500),
             opacity:      (l.opacity     ?? 100) / 100,
             rippleSpeed:  l.rippleSpeed  ?? 8.0,
             rippleWidth:  l.rippleWidth  ?? 1.2,
             rippleHoldMode: l.rippleHoldMode ?? 'once',
+            lightningHoldMode: l.lightningHoldMode ?? 'once',
+            fallDuration: l.fallDuration ?? 1500,
+            trailLength:  l.trailLength  ?? 1.5,
+            sitDuration:  l.sitDuration  ?? 200,
         }));
-    const hasReactive = reactiveLayers.length > 0;
+    const hasReactive = reactiveLayers.length > 0 && layersPanelOpen;
     try {
         await window.pywebview.api.update_reactive_config(reactiveLayers, hasReactive);
     } catch(e) {}
@@ -297,8 +511,26 @@ function stopCompositor() {
 }
 function _compositorTick() {
     _tickReactiveLayers();
+    const hasAnimating = layers.some(l =>
+        l.type === 'reactive' && l.enabled &&
+        (l.effect === 'meteor' || l.effect === 'ripple') &&
+        (l._ripples?.length > 0)
+    );
     if (layersPanelOpen) {
-        if (layerViewMode === 'composite') {
+        // For meteor/ripple: always repaint from snapshot directly
+        const reactiveLayers = layers.filter(l => l.type === 'reactive' && l.enabled &&
+            (l.effect === 'meteor' || l.effect === 'ripple' || l.effect === 'lightning') && l._ripples?.length > 0);
+        if (reactiveLayers.length > 0) {
+            const merged = compositeLayers();
+            _paintKeyboardFromMap(merged);
+            // Still send base frame to hardware
+            if (hasPyAPI()) {
+                const base = compositeLayersExcluding('reactive');
+                const payload = {};
+                Object.entries(base).forEach(([idx, {r, g, b}]) => { if (r||g||b) payload[idx]=[r,g,b]; });
+                window.pywebview.api.apply_frame(payload);
+            }
+        } else if (layerViewMode === 'composite') {
             const merged = compositeLayers();
             _paintKeyboardFromMap(merged);
             if (hasPyAPI()) {
@@ -321,7 +553,7 @@ function _compositorTick() {
             _paintKeyboardFromMap(snap);
         }
     }
-    compositorTimer = setTimeout(_compositorTick, COMPOSITOR_MS);
+    compositorTimer = setTimeout(_compositorTick, layersPanelOpen ? 16 : COMPOSITOR_MS);
 }
 
 // Send a single static frame to hardware — used when not animating
@@ -378,7 +610,7 @@ function compositeLayersExcluding(excludeType) {
 function _paintKeyboardFromMap(colorMap) {
     Object.keys(keyEls).forEach(idx => {
         const c = colorMap[idx];
-        c ? paintKey(idx, c.r, c.g, c.b) : paintKey(idx, 0, 0, 0);
+        c ? paintKey(idx, c.r, c.g, c.b) : unpaintKey(idx);
     });
 }
 
@@ -469,10 +701,14 @@ function _makeLayer(type, name, data) {
             color:        data.color        || { r: 255, g: 255, b: 255 },
             colors:       _normalizeColors(data.colors || {}),
             holdMode:     data.holdMode     || 'fade',
-            fadeDuration: data.fadeDuration ?? (data.effect === 'ripple' ? 1500 : 500),
+            fadeDuration: data.fadeDuration ?? (data.effect === 'ripple' ? 1500 : data.effect === 'meteor' ? 400 : 500),
             rippleSpeed:  data.rippleSpeed  ?? 8.0,
             rippleWidth:  data.rippleWidth  ?? 1.2,
             rippleHoldMode: data.rippleHoldMode ?? 'once',
+            lightningHoldMode: data.lightningHoldMode ?? 'once',
+            fallDuration: data.fallDuration ?? 1500,
+            trailLength:  data.trailLength  ?? 1.5,
+            sitDuration:  data.sitDuration  ?? 200,
             _reactiveColors: {},
             _ripples: [],
             _pollTs: 0,
@@ -557,8 +793,8 @@ function _syncControlsToLayer() {
 
     const isReactive = layer?.type === 'reactive';
     const reactiveStrip = document.getElementById('reactiveStripWrap');
-    if (reactiveStrip) reactiveStrip.style.display = isReactive ? 'block' : 'none';
-    if (isReactive) renderReactiveEffectList(layer);
+    if (reactiveStrip) reactiveStrip.style.display = (isReactive && layersPanelOpen) ? 'block' : 'none';
+    if (isReactive && layersPanelOpen) renderReactiveEffectList(layer);
 }
 
 function setReactiveColor(hex) {
@@ -1003,6 +1239,8 @@ function eraseLayerKey(idx) {
 const REACTIVE_EFFECTS = [
     { id: 'highlight', label: 'Key Highlight', icon: '💡', desc: 'Pressed key lights up' },
     { id: 'ripple',    label: 'Ripple',        icon: '〰️', desc: 'Ring expands from key' },
+    { id: 'meteor',    label: 'Meteor',        icon: '☄️', desc: 'Light falls to key from top' },
+    { id: 'lightning', label: 'Lightning',     icon: '⚡', desc: 'Whole column flashes instantly' },
 ];
 
 function renderReactiveEffectList(layer) {
@@ -1094,9 +1332,93 @@ function renderReactiveEffectList(layer) {
                     oninput="setReactiveColor(this.value)"
                     style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
             </div>`;
+    } else if (activeEffect === 'meteor') {
+        const fall  = layer.fallDuration ?? 1500;
+        const trail = layer.trailLength  ?? 1.5;
+        const sit   = layer.sitDuration  ?? 200;
+        const fade  = layer.fadeDuration ?? 400;
+        settingsEl.innerHTML = `
+            <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">While held:</span>
+                <button class="layer-type-btn ${(layer.rippleHoldMode||'once')==='once'?'active-mode':''}" onclick="setRippleHoldMode('once')" style="font-size:0.58rem;padding:3px 8px">ONE PER PRESS</button>
+                <button class="layer-type-btn ${(layer.rippleHoldMode||'once')==='continuous'?'active-mode':''}" onclick="setRippleHoldMode('continuous')" style="font-size:0.58rem;padding:3px 8px">CONTINUOUS</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Fall time:</span>
+                <input type="range" min="50" max="3000" step="50" value="${fall}"
+                    oninput="setMeteorParam('fallDuration',parseInt(this.value));document.getElementById('mFallVal').textContent=this.value+'ms'"
+                    style="width:90px">
+                <span id="mFallVal" style="font-size:0.6rem;color:var(--text);min-width:36px">${fall}ms</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Trail:</span>
+                <input type="range" min="0.3" max="5" step="0.1" value="${trail}"
+                    oninput="setMeteorParam('trailLength',parseFloat(this.value));document.getElementById('mTrailVal').textContent=this.value"
+                    style="width:90px">
+                <span id="mTrailVal" style="font-size:0.6rem;color:var(--text);min-width:28px">${trail}</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Sit:</span>
+                <input type="range" min="0" max="1000" step="25" value="${sit}"
+                    oninput="setMeteorParam('sitDuration',parseInt(this.value));document.getElementById('mSitVal').textContent=this.value+'ms'"
+                    style="width:90px">
+                <span id="mSitVal" style="font-size:0.6rem;color:var(--text);min-width:36px">${sit}ms</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Fade:</span>
+                <input type="range" min="50" max="2000" step="50" value="${fade}"
+                    oninput="setReactiveFadeDuration(parseInt(this.value))"
+                    style="width:90px">
+                <span id="rsFadeDurVal" style="font-size:0.6rem;color:var(--text);min-width:36px">${fade}ms</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Color:</span>
+                <input type="color" value="${_rgbToHex(layer.color||{r:255,g:255,b:255})}"
+                    oninput="setReactiveColor(this.value)"
+                    style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
+                <span style="font-size:0.55rem;color:var(--dim)">Paint keys for per-key colors</span>
+            </div>`;
+    } else if (activeEffect === 'lightning') {
+        const fade = layer.fadeDuration ?? 400;
+        settingsEl.innerHTML = `
+            <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">While held:</span>
+                <button class="layer-type-btn ${(layer.lightningHoldMode||'once')==='once'?'active-mode':''}" onclick="setLightningHoldMode('once')" style="font-size:0.58rem;padding:3px 8px">ONE PER PRESS</button>
+                <button class="layer-type-btn ${(layer.lightningHoldMode||'once')==='continuous'?'active-mode':''}" onclick="setLightningHoldMode('continuous')" style="font-size:0.58rem;padding:3px 8px">CONTINUOUS</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Fade:</span>
+                <input type="range" min="50" max="2000" step="50" value="${fade}"
+                    oninput="setReactiveFadeDuration(parseInt(this.value))"
+                    style="width:90px">
+                <span id="rsFadeDurVal" style="font-size:0.6rem;color:var(--text);min-width:36px">${fade}ms</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:0.6rem;color:var(--dim);white-space:nowrap">Color:</span>
+                <input type="color" value="${_rgbToHex(layer.color||{r:255,g:255,b:255})}"
+                    oninput="setReactiveColor(this.value)"
+                    style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
+                <span style="font-size:0.55rem;color:var(--dim)">Paint keys for per-key colors</span>
+            </div>`;
     }
 }
 
+function setLightningHoldMode(mode) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer.lightningHoldMode = mode;
+    renderReactiveEffectList(layer);
+    _reactiveSynced = false;
+    _syncReactiveConfig();
+}
+
+function setMeteorParam(key, val) {
+    const layer = getActiveLayer();
+    if (!layer || layer.type !== 'reactive') return;
+    layer[key] = val;
+    _reactiveSynced = false;
+    _syncReactiveConfig();
+}
 function setRippleSpeed(val) {
     const layer = getActiveLayer();
     if (!layer || layer.type !== 'reactive') return;
@@ -1296,6 +1618,10 @@ function closeLayersPanel() {
 
     deactivateEraser();
     restoreMainKeyboard();
+    // Hide reactive strip and stop reactive engine
+    const reactiveStrip = document.getElementById('reactiveStripWrap');
+    if (reactiveStrip) reactiveStrip.style.display = 'none';
+    _reactiveSynced = false;
     stopCompositor();
     _stopAllPlayback();
     if (typeof startStaticStream === 'function') startStaticStream();
@@ -1325,6 +1651,10 @@ function _serializeLayers() {
             out.rippleSpeed  = l.rippleSpeed  ?? 8.0;
             out.rippleWidth  = l.rippleWidth  ?? 1.2;
             out.rippleHoldMode = l.rippleHoldMode ?? 'once';
+            out.lightningHoldMode = l.lightningHoldMode ?? 'once';
+            out.fallDuration = l.fallDuration ?? 300;
+            out.trailLength  = l.trailLength  ?? 1.5;
+            out.sitDuration  = l.sitDuration  ?? 200;
         } else {
             out.loop = l.loop !== false;
             out.frames = (l.frames || []).map(f => ({ duration: f.duration, colors: f.colors || {} }));

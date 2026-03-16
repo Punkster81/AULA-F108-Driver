@@ -79,16 +79,6 @@
 
             <!-- STATIC MODE extras -->
             <div id="staticLeft" style="margin-top:12px">
-                <div class="panel-title" style="margin-bottom:10px">Effects</div>
-                <div class="effect-list">
-                    <button class="effect-btn active" data-effect="static" onclick="setEffect(this)">
-                        <div class="effect-dot" style="background:#fff"></div>Static
-                    </button>
-                </div>
-                <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
-                    Additional effects (breathing, wave, ripple…) require realtime mode and cannot be saved to flash.<br>
-                    <span style="color:var(--accent)">Layers support coming soon.</span>
-                </div>
             </div>
 
             <!-- ANIM MODE extras -->
@@ -371,6 +361,8 @@
     <script src="layers.js"></script>
     <script>
         function switchTopMode(mode) {
+            // Always deactivate eraser when switching modes
+            if (typeof deactivateEraser === 'function') deactivateEraser();
             // Close whichever mode is currently open
             if (layersPanelOpen) {
                 closeLayersPanel();
