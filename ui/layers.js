@@ -237,27 +237,20 @@ function _getDriftedMeteorPath(targetLed, drift) {
 function _getLightningSnapshot(layer) {
     const out = {};
     const now = performance.now();
-    const fadeMs = layer.fadeDuration ?? 400;
-
+    const fadeMs = layer.fadeDuration ?? 500;
     (layer._ripples || []).forEach(bolt => {
         const elapsed = now - bolt.pressTime;
-        const alpha = Math.max(0, 1.0 - elapsed / fadeMs);
-        if (alpha <= 0) return;
-
+        const a = Math.max(0, 1 - elapsed / Math.max(fadeMs, 1));
+        if (a <= 0) return;
         const path = (bolt.path && bolt.path.length) ? bolt.path : LED_METEOR_PATHS[bolt.origin];
         if (!path) return;
-
-        const c = bolt.color || {r:255,g:255,b:255};
-        const mr = c.r ?? c[0] ?? 255;
-        const mg = c.g ?? c[1] ?? 255;
-        const mb = c.b ?? c[2] ?? 255;
-
+        const {r, g, b} = bolt.color;
         path.forEach(([, keyIdx]) => {
             const cur = out[keyIdx] || {r:0,g:0,b:0};
             out[keyIdx] = {
-                r: Math.min(255, Math.round(mr*alpha + cur.r*(1-alpha))),
-                g: Math.min(255, Math.round(mg*alpha + cur.g*(1-alpha))),
-                b: Math.min(255, Math.round(mb*alpha + cur.b*(1-alpha))),
+                r: Math.min(255, Math.round(r*a + cur.r*(1-a))),
+                g: Math.min(255, Math.round(g*a + cur.g*(1-a))),
+                b: Math.min(255, Math.round(b*a + cur.b*(1-a))),
             };
         });
     });
@@ -267,44 +260,38 @@ function _getLightningSnapshot(layer) {
 function _getMeteorSnapshot(layer) {
     const out = {};
     const now = performance.now();
-    const fallMs  = layer.fallDuration ?? 1500;
-    const sitMs   = layer.sitDuration  ?? 200;
-    const fadeMs  = layer.fadeDuration ?? 400;
-    const trail   = layer.trailLength  ?? 1.5;
-
+    const fallMs = layer.fallDuration ?? 600;
+    const trailN = layer.trailLength  ?? 3.0;
+    const sitMs  = layer.sitDuration  ?? 200;
+    const fadeMs = layer.fadeDuration ?? 400;
     (layer._ripples || []).forEach(meteor => {
         const elapsed = now - meteor.pressTime;
         const path = (meteor.path && meteor.path.length) ? meteor.path : LED_METEOR_PATHS[meteor.origin];
         if (!path || !path.length) return;
         const nSteps = path.length;
-        const c = meteor.color || {r:255,g:0,b:0};
-        const mr = c.r ?? c[0] ?? 255;
-        const mg = c.g ?? c[1] ?? 0;
-        const mb = c.b ?? c[2] ?? 0;
-
-        const blend = (idx, alpha) => {
-            const cur = out[idx] || {r:0,g:0,b:0};
-            out[idx] = {
-                r: Math.min(255, Math.round(mr*alpha + cur.r*(1-alpha))),
-                g: Math.min(255, Math.round(mg*alpha + cur.g*(1-alpha))),
-                b: Math.min(255, Math.round(mb*alpha + cur.b*(1-alpha))),
-            };
-        };
-
-        const landed = elapsed >= fallMs;
-        if (landed) {
+        const {r, g, b} = meteor.color;
+        if (elapsed >= fallMs) {
             const post = elapsed - fallMs;
-            const impactAlpha = post < sitMs ? 1.0
-                : Math.max(0, 1 - (post - sitMs) / fadeMs);
-            if (impactAlpha > 0) blend(meteor.origin, impactAlpha);
+            const a = post < sitMs ? 1.0 : Math.max(0, 1 - (post - sitMs) / Math.max(fadeMs, 1));
+            if (a <= 0) return;
+            const cur = out[meteor.origin] || {r:0,g:0,b:0};
+            out[meteor.origin] = {
+                r: Math.min(255, Math.round(r*a + cur.r*(1-a))),
+                g: Math.min(255, Math.round(g*a + cur.g*(1-a))),
+                b: Math.min(255, Math.round(b*a + cur.b*(1-a))),
+            };
         } else {
-            // Light up ALL path keys above current position
-            const headStep = (nSteps - 1) * (elapsed / fallMs);
+            const headStep = (nSteps - 1) * (elapsed / Math.max(fallMs, 1));
             path.forEach(([, keyIdx], stepI) => {
-                if (stepI > headStep) return;
                 const dist = headStep - stepI;
-                if (dist > trail) return;
-                blend(keyIdx, Math.max(0, 1.0 - dist / Math.max(trail, 0.1)));
+                if (dist < 0 || dist > trailN) return;
+                const a = 1 - dist / trailN;
+                const cur = out[keyIdx] || {r:0,g:0,b:0};
+                out[keyIdx] = {
+                    r: Math.min(255, Math.round(r*a + cur.r*(1-a))),
+                    g: Math.min(255, Math.round(g*a + cur.g*(1-a))),
+                    b: Math.min(255, Math.round(b*a + cur.b*(1-a))),
+                };
             });
         }
     });
@@ -326,8 +313,8 @@ function _tickReactiveLayers() {
             const totalMs = (layer.fallDuration ?? 1500) + (layer.sitDuration ?? 200) + (layer.fadeDuration ?? 400);
             layer._ripples = (layer._ripples || []).filter(rip => (now - rip.pressTime) < totalMs);
         } else if (layer.effect === 'lightning') {
-            const fadeMs = layer.fadeDuration ?? 400;
-            layer._ripples = (layer._ripples || []).filter(rip => (now - rip.pressTime) < fadeMs);
+            const fadeMs = layer.fadeDuration ?? 500;
+            layer._ripples = (layer._ripples || []).filter(rip => (now - rip.pressTime) < fadeMs + 100);
         } else {
             const maxHold = (layer.fadeDuration || 500) * 3;
             Object.keys(layer._reactiveColors).forEach(idx => {
@@ -419,7 +406,6 @@ async function _pollReactiveLayers() {
                                 const drift = Math.floor(Math.random() * 3) - 1;
                                 const path = _getDriftedMeteorPath(idx, drift);
                                 layer._ripples.push({ origin: idx, color: c, pressTime: now, path });
-                                if (layersPanelOpen) requestAnimationFrame(() => _refreshKeyboard());
                             }
                         } else {
                             // ripple / meteor
@@ -429,7 +415,6 @@ async function _pollReactiveLayers() {
                                 const drift = Math.floor(Math.random() * 3) - 1;
                                 const driftedPath = _getDriftedMeteorPath(idx, drift);
                                 layer._ripples.push({ origin: idx, color: c, pressTime: now, releaseTime: null, path: driftedPath });
-                                if (layersPanelOpen) requestAnimationFrame(() => _refreshKeyboard());
                             }
                         }
                     } else if (ev.type === 'release') {
