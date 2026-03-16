@@ -178,14 +178,7 @@ function _getDriftedMeteorPath(targetLed, drift) {
 }
 
 // ── Shared settings UI helpers ────────────────────────────────────────────────
-function _colorPickerHTML(layer) {
-    return `<div style="display:flex;gap:6px;align-items:center">
-        <span class="rs-label">Color:</span>
-        <input type="color" value="${_rgbToHex(layer.color||{r:255,g:255,b:255})}" oninput="setReactiveColor(this.value)"
-            style="width:36px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer">
-        <span style="font-size:0.55rem;color:var(--dim)">Paint keys for per-key colors</span>
-    </div>`;
-}
+function _colorPickerHTML() { return ''; }
 function _holdModeHTML(layer, paramKey, options) {
     return `<div style="display:flex;gap:5px;align-items:center">
         <span class="rs-label">While held:</span>
@@ -312,11 +305,16 @@ const Effects = {
         defaults: { fallDuration:600, trailLength:3.0, sitDuration:200, fadeDuration:400, rippleHoldMode:'once' },
         initRippleState: ()=>([]),
         onPress(state, idx, c, now, layer) {
-            if ((layer.rippleHoldMode||'once')!=='continuous' && state.some(r=>r.origin===idx&&r.releaseTime===null)) return;
+            if (!layer._heldKeys) layer._heldKeys = new Set();
+            if ((layer.rippleHoldMode||'once')!=='continuous') {
+                if (layer._heldKeys.has(idx)) return;
+            }
+            layer._heldKeys.add(idx);
             const drift=Math.floor(Math.random()*3)-1;
             state.push({ origin:idx, color:c, pressTime:now, releaseTime:null, path:_getDriftedMeteorPath(idx,drift) });
         },
-        onRelease(state, idx, now) {
+        onRelease(state, idx, now, layer) {
+            layer._heldKeys?.delete(idx);
             for (let i=state.length-1;i>=0;i--) { if(state[i].origin===idx&&state[i].releaseTime===null){state[i].releaseTime=now;break;} }
         },
         snapshot(layer, now) {
@@ -365,12 +363,18 @@ const Effects = {
         defaults: { fadeDuration:500, lightningHoldMode:'once' },
         initRippleState: ()=>([]),
         onPress(state, idx, c, now, layer) {
-            const fadeMs=layer.fadeDuration??500;
-            if ((layer.lightningHoldMode||'once')!=='continuous' && state.some(r=>r.origin===idx&&(now-r.pressTime)<fadeMs)) return;
+            if (!layer._heldKeys) layer._heldKeys = new Set();
+            if ((layer.lightningHoldMode||'once')!=='continuous') {
+                if (layer._heldKeys.has(idx)) return;
+            }
+            layer._heldKeys.add(idx);
             const drift=Math.floor(Math.random()*3)-1;
-            state.push({ origin:idx, color:c, pressTime:now, path:_getDriftedMeteorPath(idx,drift) });
+            state.push({ origin:idx, color:c, pressTime:now, released:false, path:_getDriftedMeteorPath(idx,drift) });
         },
-        onRelease() {},
+        onRelease(state, idx, now, layer) {
+            layer._heldKeys?.delete(idx);
+            for (let i=state.length-1;i>=0;i--) { if(state[i].origin===idx&&!state[i].released){state[i].released=true;break;} }
+        },
         snapshot(layer, now) {
             const out={}, fadeMs=layer.fadeDuration??500, opacity=(layer.opacity??100)/100, toDel=[];
             (layer._ripples||[]).forEach((bolt,i) => {
@@ -680,7 +684,7 @@ function _stopAllPlayback() {
     // Reset all animation layers to frame 0
     layers.forEach(l => {
         if (l.type==='animation') l._frameIdx=0;
-        if (l.type==='reactive') { l._reactiveColors={}; l._ripples=[]; }
+        if (l.type==='reactive') { l._reactiveColors={}; l._ripples=[]; l._heldKeys=new Set(); }
     });
     if (_layerAnimActive && animFrames?.length) selectAnimFrame(0);
     _syncReactiveConfig();
@@ -716,9 +720,9 @@ async function _pollReactiveLayers() {
             const state=(layer.effect==='highlight')?layer._reactiveColors:layer._ripples;
             res.events.forEach(ev => {
                 const idx=ev.led, perKey=layer.colors?.[idx];
-                if (!perKey) { if(ev.type==='release')effectDef.onRelease(state,idx,now); return; }
+                if (!perKey) { if(ev.type==='release')effectDef.onRelease(state,idx,now,layer); return; }
                 if (ev.type==='press')   effectDef.onPress(state,idx,perKey,now,layer);
-                if (ev.type==='release') effectDef.onRelease(state,idx,now);
+                if (ev.type==='release') effectDef.onRelease(state,idx,now,layer);
             });
         });
     } catch(e) {}
