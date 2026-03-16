@@ -1063,7 +1063,7 @@ function copyFromMain()   { if(activeAnimFrame<0){if(typeof toast==='function')t
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 function _syncAllPlayBtns(playing) {
-    ['playBtn','layerPlayBtn'].forEach(id=>{const btn=document.getElementById(id);if(!btn)return;btn.textContent=playing?'■ STOP':'▶ PREVIEW';btn.classList.toggle('playing',playing);});
+    ['playBtn','layerPlayBtn'].forEach(id=>{const btn=document.getElementById(id);if(!btn)return;btn.textContent=playing?'■ STOP':'▶ PLAY ANIMATION';btn.classList.toggle('playing',playing);});
 }
 // loop is always true on all animation layers
 function togglePreview() {
