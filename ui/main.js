@@ -293,10 +293,47 @@ async function connectKeyboard() {
     if(r.ok){
         status.textContent=r.message; dot.style.background='#2ecc71'; dot.style.boxShadow='0 0 8px #2ecc71';
         toast('Connected!'); startStaticStream(); await restoreLastLighting();
+        _checkForUpdate();
+        window.pywebview.api.get_version().then(r=>{ if(r.ok){const el=document.getElementById('appVersion');if(el)el.textContent=r.version;} });
     } else {
         status.textContent=r.message; dot.style.background='#ff4444'; dot.style.boxShadow='0 0 8px #ff4444';
         toast(r.message);
     }
+}
+
+async function _checkForUpdate() {
+    try {
+        const r = await window.pywebview.api.check_for_update();
+        if (!r.ok || !r.available) return;
+        _showUpdateBanner(r.version, r.url);
+    } catch(e) {}
+}
+
+function _showUpdateBanner(version, url) {
+    let banner = document.getElementById('updateBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'updateBanner';
+        banner.style.cssText = `
+            position:fixed;bottom:40px;right:16px;z-index:9999;
+            background:var(--panel);border:1px solid var(--accent);border-radius:8px;
+            padding:12px 16px;display:flex;flex-direction:column;gap:8px;
+            box-shadow:0 4px 20px rgba(0,0,0,0.4);max-width:280px;`;
+        document.body.appendChild(banner);
+    }
+    banner.innerHTML = `
+        <div style="font-size:0.72rem;font-weight:700;color:var(--accent)">⬆ Update available</div>
+        <div style="font-size:0.62rem;color:var(--dim)">${version} is ready to install.</div>
+        <div style="display:flex;gap:8px">
+            <button onclick="_applyUpdate('${url}')" style="flex:1;background:var(--accent);border:none;border-radius:5px;color:#fff;font-family:inherit;font-size:0.65rem;font-weight:700;padding:7px;cursor:pointer">UPDATE & RESTART</button>
+            <button onclick="this.closest('#updateBanner').remove()" style="background:none;border:1px solid var(--border);border-radius:5px;color:var(--dim);font-family:inherit;font-size:0.65rem;padding:7px 10px;cursor:pointer">Later</button>
+        </div>`;
+}
+
+async function _applyUpdate(url) {
+    const banner = document.getElementById('updateBanner');
+    if (banner) banner.innerHTML = '<div style="font-size:0.65rem;color:var(--dim);padding:4px 0">Downloading update... app will restart.</div>';
+    await window.pywebview.api.apply_update(url);
 }
 
 async function restoreLastLighting() {

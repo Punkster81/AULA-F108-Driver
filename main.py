@@ -11,6 +11,84 @@ import threading
 import winreg
 import subprocess as _subprocess
 
+VERSION = 'v1.0.0'
+GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
+
+# ── Update system ─────────────────────────────────────────────────────────────
+def _get_exe_dir():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def _get_current_exe():
+    if getattr(sys, 'frozen', False):
+        return sys.executable
+    return None  # not an exe — skip self-replace when running from source
+
+def _check_for_update():
+    """Check GitHub releases for a newer version. Returns dict or None."""
+    try:
+        import urllib.request
+        url = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
+        req = urllib.request.Request(url, headers={'User-Agent': 'aula-f108-driver'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read())
+        latest = data.get('tag_name', '')
+        if latest and latest != VERSION:
+            # Find the exe asset
+            asset_url = None
+            for asset in data.get('assets', []):
+                if asset['name'].endswith('.exe'):
+                    asset_url = asset['browser_download_url']
+                    break
+            return {'version': latest, 'url': asset_url, 'notes': data.get('body', '')}
+        return None
+    except Exception as e:
+        print(f'[updater] update check failed: {e}', flush=True)
+        return None
+
+def _download_and_apply_update(asset_url):
+    """Download new exe, write updater bat, launch it, exit."""
+    try:
+        import urllib.request
+        exe_path = _get_current_exe()
+        if not exe_path:
+            return {'ok': False, 'message': 'Not running as exe — update manually'}
+
+        exe_dir  = os.path.dirname(exe_path)
+        exe_name = os.path.basename(exe_path)
+        new_exe  = os.path.join(exe_dir, '_update_new.exe')
+        bat_path = os.path.join(exe_dir, '_updater.bat')
+
+        print(f'[updater] downloading {asset_url}', flush=True)
+        urllib.request.urlretrieve(asset_url, new_exe)
+
+        # Write bat: wait for us to exit, swap files, relaunch, self-delete
+        bat = f'''@echo off
+timeout /t 3 /nobreak >nul
+move /y "{new_exe}" "{exe_path}"
+start "" "{exe_path}"
+del "%~f0"
+'''
+        with open(bat_path, 'w') as f:
+            f.write(bat)
+
+        # Launch bat detached so it survives our exit
+        _subprocess.Popen(
+            ['cmd', '/c', bat_path],
+            creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS,
+            close_fds=True,
+        )
+
+        # Stop driver cleanly then exit
+        _send_driver_cmd('STOP')
+        import time; time.sleep(0.5)
+        os._exit(0)
+
+    except Exception as e:
+        print(f'[updater] update failed: {e}', flush=True)
+        return {'ok': False, 'message': str(e)}
+
 # ── Launch driver subprocess BEFORE importing webview ─────────────────────────
 # pywebview/CEF crashes if subprocesses are spawned after it initializes.
 # Start driver here at the very top, before any webview import.
@@ -220,16 +298,6 @@ def layers_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
-def reactive_dir():
-    """Returns (and creates if needed) the 'reactive' folder next to main.py / the exe."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, 'reactive')
-    os.makedirs(d, exist_ok=True)
-    return d
-
 class AnimationAPI:
     def save_current_animation(self, data):
         """Save animation as current_animation.json and also write current.json pointer."""
@@ -413,45 +481,6 @@ class AnimationAPI:
             return {'ok': False, 'message': str(e)}
 
     # ── Layer presets ──────────────────────────────────────────────────────────
-    def save_reactive_preset(self, name, data):
-        try:
-            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'reactive'
-            fname = safe.replace(' ', '_').lower() + '.json'
-            data['name'] = name
-            path = os.path.join(reactive_dir(), fname)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-            return {'ok': True, 'path': path, 'filename': fname}
-        except Exception as e:
-            return {'ok': False, 'message': str(e)}
-
-    def list_reactive_presets(self):
-        try:
-            results = []
-            d = reactive_dir()
-            for fname in sorted(os.listdir(d)):
-                if not fname.lower().endswith('.json'):
-                    continue
-                try:
-                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    data['_filename'] = fname
-                    results.append(data)
-                except Exception:
-                    pass
-            return {'ok': True, 'presets': results}
-        except Exception as e:
-            return {'ok': False, 'presets': [], 'message': str(e)}
-
-    def delete_reactive_preset(self, filename):
-        try:
-            path = os.path.join(reactive_dir(), os.path.basename(filename))
-            if os.path.exists(path):
-                os.remove(path)
-            return {'ok': True}
-        except Exception as e:
-            return {'ok': False, 'message': str(e)}
-
     def save_layer_preset(self, name, data):
         """
         Save a layer stack to layers/<name>.json.
@@ -525,6 +554,21 @@ class AnimationAPI:
             return {'ok': True, 'ts': now, 'held': list(held), 'events': events}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
+
+    def get_version(self):
+        return {'ok': True, 'version': VERSION}
+
+    def check_for_update(self):
+        result = _check_for_update()
+        if result:
+            return {'ok': True, 'available': True, 'version': result['version'],
+                    'url': result['url'], 'notes': result['notes']}
+        return {'ok': True, 'available': False}
+
+    def apply_update(self, url):
+        """Download new exe and apply update. App will restart automatically."""
+        threading.Thread(target=_download_and_apply_update, args=(url,), daemon=True).start()
+        return {'ok': True}
 
 
 

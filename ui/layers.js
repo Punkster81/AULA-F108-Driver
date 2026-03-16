@@ -44,6 +44,8 @@ function _setReactiveParam(key, val, labelId, labelSuffix='') {
     const layer = getActiveLayer();
     if (!layer || layer.type !== 'reactive') return;
     layer[key] = val;
+    // Clear reactive state when hold mode changes so stale fade entries don't carry over
+    if (key === 'holdMode') { layer._reactiveColors = {}; layer._heldKeys = new Set(); }
     const el = document.getElementById(labelId);
     if (el) el.textContent = val + labelSuffix;
     _reactiveSynced = false;
@@ -219,10 +221,25 @@ const Effects = {
         label:'Key Highlight', icon:'💡', desc:'Pressed key lights up',
         defaults: { holdMode:'fade', fadeDuration:500 },
         initRippleState: () => ({}),
-        onPress(state, idx, c, now) {
+        onPress(state, idx, c, now, layer) {
+            const hold = layer.holdMode || 'fade';
+            if (hold === 'toggle-on') {
+                // Off by default — press toggles on/off
+                if (state[idx]?.on) delete state[idx];
+                else state[idx] = { r:c.r, g:c.g, b:c.b, on:true, releaseTime:null, pressTime:now };
+                return;
+            }
+            if (hold === 'toggle-off') {
+                // On by default — press toggles off/on
+                if (state[idx]?.on === false) delete state[idx];
+                else state[idx] = { r:c.r, g:c.g, b:c.b, on:false, releaseTime:null, pressTime:now };
+                return;
+            }
             state[idx] = { r:c.r, g:c.g, b:c.b, releaseTime:null, pressTime:now };
         },
-        onRelease(state, idx, now) {
+        onRelease(state, idx, now, layer) {
+            const hold = layer.holdMode || 'fade';
+            if (hold === 'toggle-on' || hold === 'toggle-off') return; // toggle state persists
             if (state[idx]) state[idx].releaseTime = now;
             else state[idx] = { r:0,g:0,b:0, releaseTime:now, pressTime:now };
         },
@@ -230,6 +247,16 @@ const Effects = {
             const out={}, fadeMs=layer.fadeDuration??500, hold=layer.holdMode||'fade';
             const opacity=(layer.opacity??100)/100, toDel=[];
             Object.entries(layer._reactiveColors||{}).forEach(([idx,key]) => {
+                if (hold === 'toggle-on') {
+                    if (key.on) _blendInto(out, idx, key.r, key.g, key.b, opacity);
+                    return;
+                }
+                if (hold === 'toggle-off') {
+                    // key.on===false means it's been turned off — show nothing
+                    // absent from state means not yet pressed — show at full brightness
+                    if (key.on !== false) _blendInto(out, idx, key.r, key.g, key.b, opacity);
+                    return;
+                }
                 let alpha;
                 if (key.releaseTime!==null) {
                     if (hold==='instant') { toDel.push(idx); return; }
@@ -238,10 +265,20 @@ const Effects = {
                 } else { alpha=1; }
                 _blendInto(out, idx, key.r, key.g, key.b, alpha*opacity);
             });
+            // toggle-off: keys with a color painted but not in state are "on"
+            if (hold === 'toggle-off') {
+                Object.entries(layer.colors||{}).forEach(([idx, c]) => {
+                    if (!layer._reactiveColors[idx]) {
+                        _blendInto(out, idx, c.r, c.g, c.b, opacity);
+                    }
+                });
+            }
             toDel.forEach(idx => delete layer._reactiveColors[idx]);
             return out;
         },
         prune(layer, now) {
+            const hold = layer.holdMode || 'fade';
+            if (hold === 'toggle-on' || hold === 'toggle-off') return; // toggles never expire
             const maxHold=(layer.fadeDuration||500)*3;
             Object.keys(layer._reactiveColors||{}).forEach(idx => {
                 const key=layer._reactiveColors[idx];
@@ -249,8 +286,9 @@ const Effects = {
             });
         },
         settingsHTML(layer) {
-            const fade=(layer.holdMode||'fade')==='fade';
-            return _holdModeHTML(layer,'holdMode',[['fade','FADE OUT'],['instant','INSTANT OFF']])
+            const hold = layer.holdMode || 'fade';
+            const fade = hold === 'fade';
+            return _holdModeHTML(layer,'holdMode',[['fade','FADE OUT'],['instant','INSTANT OFF'],['toggle-on','TOGGLE (off→on)'],['toggle-off','TOGGLE (on→off)']])
                 + (fade ? _sliderHTML(layer,'fadeDuration','Fade',50,3000,50,500,'rsFadeVal') : '')
                 + _colorPickerHTML(layer);
         },
@@ -731,7 +769,8 @@ async function _syncReactiveConfig() {
     if (!hasPyAPILayers()) return;
     const reactiveLayers=layers.filter(l=>l.type==='reactive'&&l.enabled).map(l=>({
         effect:l.effect||'highlight', color:l.color||{r:255,g:255,b:255}, colors:l.colors||{},
-        holdMode:l.holdMode||'fade', fadeDuration:l.fadeDuration??500, opacity:(l.opacity??100)/100,
+        holdMode:l.holdMode||'fade',
+        fadeDuration: (l.holdMode==='toggle-on'||l.holdMode==='toggle-off') ? 0 : (l.fadeDuration??500), opacity:(l.opacity??100)/100,
         rippleSpeed:l.rippleSpeed??8.0, rippleWidth:l.rippleWidth??1.2,
         rippleHoldMode:l.rippleHoldMode??'once', lightningHoldMode:l.lightningHoldMode??'once',
         fallDuration:l.fallDuration??600, trailLength:l.trailLength??3.0, sitDuration:l.sitDuration??200,

@@ -12,18 +12,20 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 ## Features
 
 - Full per-key RGB control
-- **Flash mode** — burn static colors to onboard memory, persists after power cycle (no software needed)
+- **Flash mode** — burn static colors to onboard memory, persists after power cycle with no software needed
 - **Layer system** — stack unlimited layers with per-layer opacity and blending
   - Static layers — per-key color maps
   - Animation layers — frame timeline with per-frame colors and durations
-  - Reactive layers — keypress-driven effects (see below)
+  - Reactive layers — keypress-driven effects
 - **Reactive effects** — per-key colors triggered by keypresses, easily extensible
-  - Key Highlight — pressed key lights up and fades on release
+  - Key Highlight — pressed key lights up, with fade, instant off, or toggle modes
   - Ripple — expanding ring from keypress
   - Meteor — light falls from top row down to the pressed key with trail
   - Lightning — entire column flashes instantly on press
-- Save/load layer presets, animations, and flash presets as JSON files
-- Native desktop app (PyWebView — no browser needed)
+- Save/load layer presets, animations, flash presets, and reactive presets as JSON
+- Auto-updater — notified of new releases on startup, one-click update and restart
+- Launch on Windows startup (optional)
+- Native desktop app via PyWebView — no browser needed
 
 ## Hardware
 
@@ -47,11 +49,11 @@ pip install -r requirements.txt
 python main.py
 ```
 
-> **Note:** Close the official AULA software before running — it holds the HID interface exclusively.
+> **Note:** The app requests administrator privileges on launch — this is required for HID device access. Close the official AULA software first, as it holds the HID interface exclusively.
 
 ## Pre-built executable
 
-Download the latest `aula_driver.exe` from [Releases](../../releases) — no Python install needed.
+Download the latest `aula_driver.exe` from [Releases](../../releases). No Python install needed. The app will notify you automatically when a newer version is available and can update itself with one click.
 
 ---
 
@@ -59,109 +61,124 @@ Download the latest `aula_driver.exe` from [Releases](../../releases) — no Pyt
 
 ```
 AULA-F108-Driver/
-├── main.py                    # PyWebView app entry point + Python API bridge
-├── driver.py                  # Background HID + keyboard hook process
-├── aula_f108_pro_final.py     # Low-level HID protocol (Win32 DeviceIoControl)
+├── .github/
+│   └── workflows/
+│       └── build.yml              # Auto-builds exe and publishes to Releases on version tag
+├── main.py                        # PyWebView app entry point, Python API bridge, auto-updater
+├── driver.py                      # Background HID + keyboard hook process
+├── aula_f108_pro_final.py         # Low-level HID protocol (Win32 DeviceIoControl)
 ├── requirements.txt
 └── ui/
-    ├── index.html             # App shell
-    ├── main.css               # Core styles
-    ├── anim.css               # Timeline / frame editor styles
-    ├── layers.css             # Layer strip and card styles
-    ├── layout.js              # Keyboard layout data (ROWS, NAV, NUMPAD)
-    ├── main.js                # Color picker, keyboard builder, selection, PyWebView bridge
-    ├── flash.js               # Flash-to-memory tab (save colors to onboard storage)
-    └── layers.js              # Layer system, compositor, animation editor, reactive effects
+    ├── index.html                 # App shell
+    ├── main.css                   # Core styles
+    ├── anim.css                   # Timeline / frame editor styles
+    ├── layers.css                 # Layer strip and card styles
+    ├── layout.js                  # Keyboard layout data (ROWS, NAV, NUMPAD)
+    ├── main.js                    # Color picker, keyboard DOM, selection, PyWebView bridge
+    ├── flash.js                   # Flash-to-memory tab
+    └── layers.js                  # Layer system, compositor, animation editor, reactive effects
 ```
 
-### Why two JS files instead of three?
+User data is stored in folders next to the exe and is never committed to the repo:
 
-The old `anim.js` standalone animation tab has been merged into `layers.js`. Animations are now just a layer type — you add an animation layer inside the Layers panel and edit its frames there. This eliminates duplicated compositor logic and makes animations compositable with other layers.
-
-`flash.js` stays separate because it is the only mode that writes to keyboard onboard memory. It is intentionally distinct from the live-streaming layer system.
+```
+animations/    — saved animation files
+lighting/      — saved flash presets
+layers/        — saved layer stack presets
+reactive/      — saved reactive layer presets
+```
 
 ---
 
 ## Two-mode design
 
 ### 💾 Flash
-Writes colors directly to the keyboard's onboard flash memory. Colors survive power cycles — the keyboard shows them even with no software running. Use this for your "default" keyboard appearance.
+Writes colors directly to keyboard onboard memory. Survives power cycles — the keyboard shows them with no software running. Use this for a default appearance.
 
 ### ⚡ Layers
-Streams a live composite frame to the keyboard at ~30fps. Layers are stacked bottom-to-top. Any combination of static, animation, and reactive layers can be mixed. The full composite is sent to hardware via shared memory — the driver just writes it, no separate reactive engine running on the driver side.
+Streams a live composite frame to the keyboard at ~30fps. Layers are stacked bottom-to-top with per-layer opacity. Any combination of static, animation, and reactive layers can be mixed. The compositor runs in JS and pushes frames via shared memory to the driver process, which writes them to hardware.
 
 ---
 
 ## Architecture
 
 ```
-main.py (UI process)
-  └─ spawns driver.py (background process)
+main.py  (UI process — PyWebView)
+  └─ spawns driver.py  (background process — HID + Win32 keyboard hook)
 
 Shared memory:
-  AulaF108Frame  — UI writes compositor frames → driver reads and sends to HW
-  AulaF108Keys   — driver writes key events → UI reads for reactive display
+  AulaF108Frame  — UI writes compositor frames → driver sends to hardware
+  AulaF108Keys   — driver writes key events   → UI reads for reactive effects
 
-UI JS stack (load order):
-  layout.js   → key geometry constants
-  main.js     → color state, keyboard DOM, mode registry
-  flash.js    → flash-to-memory tab logic
-  layers.js   → layer system, compositor, all effects
+JS load order:
+  layout.js   → keyboard geometry constants
+  main.js     → color picker, keyboard DOM, selection, bridge, updater UI
+  flash.js    → flash-to-memory tab
+  layers.js   → layers, compositor, animation editor, all reactive effects
 ```
-
-### Adding a new reactive effect
-
-Open `layers.js` and add one entry to the `Effects` object:
-
-```js
-const Effects = {
-    // ... existing effects ...
-
-    myEffect: {
-        label: 'My Effect',
-        icon:  '✨',
-        desc:  'Does something cool',
-        defaults: { fadeDuration: 600, myParam: 1.0 },
-        initRippleState: () => ([]),
-        onPress(state, idx, color, now, layer)  { /* push to state */ },
-        onRelease(state, idx, now)              { /* mark release */ },
-        snapshot(layer, now)                   { /* return {idx:{r,g,b}} */ },
-        prune(layer, now)                      { /* remove expired entries */ },
-        settingsHTML(layer)                    { /* return HTML string */ },
-        serializeExtra(layer)                  { return { myParam: layer.myParam ?? 1.0 }; },
-    },
-};
-```
-
-That's it. The effect card appears in the UI automatically, the poller routes keypresses to it automatically, and it serializes/deserializes automatically. Nothing else needs changing.
-
-You also need to add the same effect logic to `driver.py` so the hardware matches the display — add a `_apply_myEffect` method and wire it into `_build_reactive_frame` and `_on_key_event`.
 
 ---
 
-## Protocol notes
+## Releasing a new version
 
-The keyboard uses a Sinowealth 8051 controller. All communication goes through USB HID feature reports on interface 3 (`usage_page=0xff13`). Standard `hidapi` won't work on Windows — you must use `DeviceIoControl` with `IOCTL_HID_SET_FEATURE` / `IOCTL_HID_GET_FEATURE`.
+1. Bump `VERSION` in `main.py` (e.g. `VERSION = 'v1.1.0'`)
+2. Commit and push
+3. Tag the release:
 
-Key protocol details are documented in `aula_f108_pro_final.py`.
+```bash
+git add .
+git commit -m "your message"
+git push
+git tag v1.1.0
+git push --tags 
+```
 
----
+GitHub Actions builds the exe on Windows and attaches it to the release automatically. Users running the app will see an update prompt on next launch.
 
-## Building the exe
+## Building the exe manually
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --add-data "ui;ui" --name aula_driver main.py
+pyinstaller --onefile --windowed \
+  --add-data "ui;ui" \
+  --add-data "driver.py;." \
+  --add-data "aula_f108_pro_final.py;." \
+  --name aula_driver \
+  main.py
 # Output: dist/aula_driver.exe
 ```
 
 ---
 
+## Adding a new reactive effect
+
+Add one entry to the `Effects` object in `layers.js`. Nothing else needs changing in the UI:
+
+```js
+myEffect: {
+    label: 'My Effect',
+    icon:  '✨',
+    desc:  'Does something cool',
+    defaults: { fadeDuration: 600, myParam: 1.0 },
+    initRippleState: () => ([]),
+    onPress(state, idx, color, now, layer)  { /* push entry to state */ },
+    onRelease(state, idx, now, layer)       { /* mark release */ },
+    snapshot(layer, now)                   { /* return {idx:{r,g,b}} map */ },
+    prune(layer, now)                      { /* remove expired state entries */ },
+    settingsHTML(layer)                    { /* return HTML string for settings strip */ },
+    serializeExtra(layer)                  { return { myParam: layer.myParam ?? 1.0 }; },
+},
+```
+
+Then add matching logic to `driver.py` — a `_apply_myEffect` method wired into `_build_reactive_frame` and `_on_key_event` — so the hardware matches the display.
+
+---
+
 ## Protocol notes
 
 The keyboard uses a Sinowealth 8051 controller. All communication goes through USB HID feature reports on interface 3 (`usage_page=0xff13`). Standard `hidapi` won't work on Windows — you must use `DeviceIoControl` with `IOCTL_HID_SET_FEATURE` / `IOCTL_HID_GET_FEATURE`.
 
-Key protocol details are documented in `aula_f108_pro_final.py`.
+Full protocol details are documented in `aula_f108_pro_final.py`.
 
 ### LED index map (confirmed)
 
@@ -205,11 +222,13 @@ Key protocol details are documented in `aula_f108_pro_final.py`.
 
 ---
 
+## Contributing
+
 PRs welcome. Key areas that would benefit from contributions:
 
-- New reactive effects (see "Adding a new reactive effect" above)
-- Capture and reverse-engineer built-in effect commands (breathing, wave, ripple) from official software
-- macOS / Linux support investigation
+- New reactive effects (see adding a new reactive effect above)
+- Capture and reverse-engineer built-in firmware effect commands (breathing, wave, spectrum) from official AULA software
+- macOS / Linux HID support investigation
 
 ## License
 

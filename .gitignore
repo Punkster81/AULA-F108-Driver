@@ -31,9 +31,14 @@ desktop.ini
 # Logs
 *.log
 
-# User customization data
+# User data — not committed, lives next to the exe
 animations/
 lighting/
 colors/
 layers/
+reactive/
 driver_cmd.json
+
+# Updater temp files
+_update_new.exe
+_updater.bat

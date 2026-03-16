@@ -1,13 +1,9 @@
-name: Build & Release
+name: Build and Release
 
-# Triggers when you push a tag like v1.0.0
 on:
   push:
     tags:
-      - 'v*.*.*'
-
-permissions:
-  contents: write   # needed to create a GitHub Release and upload assets
+      - 'v*'
 
 jobs:
   build:
@@ -24,49 +20,21 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller hidapi pywebview[qt]
 
-      - name: Build executable
+      - name: Build exe
         run: |
-          pyinstaller `
-            --onefile `
-            --windowed `
+          pyinstaller --onefile --windowed `
             --add-data "ui;ui" `
+            --add-data "driver.py;." `
+            --add-data "aula_f108_pro_final.py;." `
             --name aula_driver `
-            --icon ui/icon.ico `
             main.py
-        # Note: remove --icon line if you don't have ui/icon.ico
 
-      - name: Verify build
-        run: |
-          if (!(Test-Path "dist/aula_driver.exe")) {
-            Write-Error "Build failed — exe not found"
-            exit 1
-          }
-          Write-Host "Build succeeded: $(Get-Item dist/aula_driver.exe | Select-Object -ExpandProperty Length) bytes"
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "AULA F108 Pro Driver ${{ github.ref_name }}"
-          body: |
-            ## AULA F108 Pro RGB Driver ${{ github.ref_name }}
-
-            ### Installation
-            Download `aula_driver.exe` below and run it — no Python install needed.
-
-            ### Requirements
-            - Windows 10/11
-            - AULA F108 Pro keyboard (VID:0C45 PID:800A)
-            - Close official AULA software before running
-
-            ### Running from source
-            ```
-            pip install -r requirements.txt
-            python main.py
-            ```
           files: dist/aula_driver.exe
-          draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
