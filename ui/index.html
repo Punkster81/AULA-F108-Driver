@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,424 +7,306 @@
     <link rel="stylesheet" href="main.css">
     <link rel="stylesheet" href="anim.css">
     <link rel="stylesheet" href="layers.css">
+    <style>
+        .rs-label { font-size:0.6rem; color:var(--dim); white-space:nowrap; flex-shrink:0; }
+        .rs-val    { font-size:0.6rem; color:var(--text); min-width:38px; flex-shrink:0; }
+    </style>
 </head>
-
 <body>
 
-    <header>
-        <div class="logo">AULA <span>F108 Pro</span> — RGB Driver</div>
-        <div class="status-bar">
-            <div class="status-dot"></div>
-            <span id="conn-status">Not connected</span>
-            <button class="tb-btn" onclick="connectKeyboard()" style="font-size:0.65rem;padding:4px 12px">⚡ CONNECT</button>
-            <span class="footer-tag">VID:0C45 PID:800A</span>
-            <button class="tb-btn settings-cog" onclick="openSettings()" title="Settings">⚙</button>
+<header>
+    <div class="logo">AULA <span>F108 Pro</span> — RGB Driver</div>
+    <div class="status-bar">
+        <div class="status-dot"></div>
+        <span id="conn-status">Not connected</span>
+        <button class="tb-btn" onclick="connectKeyboard()" style="font-size:0.65rem;padding:4px 12px">⚡ CONNECT</button>
+        <span class="footer-tag">VID:0C45 PID:800A</span>
+        <button class="tb-btn settings-cog" onclick="openSettings()" title="Settings">⚙</button>
+    </div>
+</header>
+
+<!-- Settings modal -->
+<div id="settingsOverlay" class="settings-overlay" onclick="closeSettings(event)">
+    <div class="settings-modal">
+        <div class="settings-header">
+            <span class="settings-title">⚙ Settings</span>
+            <button class="settings-close" onclick="closeSettings()">✕</button>
         </div>
-    </header>
-
-    <!-- Settings modal -->
-    <div id="settingsOverlay" class="settings-overlay" onclick="closeSettings(event)">
-        <div class="settings-modal">
-            <div class="settings-header">
-                <span class="settings-title">⚙ Settings</span>
-                <button class="settings-close" onclick="closeSettings()">✕</button>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">System</div>
-                <div class="settings-row">
-                    <div>
-                        <div class="settings-label">Launch on startup</div>
-                        <div class="settings-desc">Start the driver automatically when Windows boots</div>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="startupToggle" onchange="setStartup(this.checked)">
-                        <span class="toggle-track"></span>
-                    </label>
+        <div class="settings-section">
+            <div class="settings-section-title">System</div>
+            <div class="settings-row">
+                <div>
+                    <div class="settings-label">Launch on startup</div>
+                    <div class="settings-desc">Start the driver automatically when Windows boots</div>
                 </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="startupToggle" onchange="setStartup(this.checked)">
+                    <span class="toggle-track"></span>
+                </label>
             </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">About</div>
-                <div class="settings-desc" style="line-height:1.9">
-                    AULA F108 Pro RGB Driver<br>
-                    VID:0C45 · PID:800A · Interface 3<br>
-                    <span style="color:var(--dim)">Open source — not affiliated with AULA</span>
-                </div>
+        </div>
+        <div class="settings-section">
+            <div class="settings-section-title">About</div>
+            <div class="settings-desc" style="line-height:1.9">
+                AULA F108 Pro RGB Driver<br>
+                VID:0C45 · PID:800A · Interface 3<br>
+                <span style="color:var(--dim)">Open source — not affiliated with AULA</span>
             </div>
         </div>
     </div>
+</div>
 
-    <main>
-        <!-- LEFT panel -->
-        <div class="panel" id="leftPanel">
+<main>
+    <!-- LEFT panel -->
+    <div class="panel" id="leftPanel">
 
-            <!-- SHARED: Color picker (always visible) -->
-            <div id="colorSection">
-                <div class="panel-title">Color</div>
-                <div class="color-picker-wrap">
-                    <div class="color-preview" id="colorPreview" onclick="document.getElementById('colorInput').click()">
-                        <input type="color" id="colorInput" value="#ff0000">
-                    </div>
-                    <div class="rgb-row">
-                        <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255" value="255"></div>
-                        <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255" value="0"></div>
-                        <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255" value="0"></div>
-                    </div>
-                    <button class="tb-btn mode-btn eyedropper-btn" onclick="toggleEyedropper()" style="width:100%;margin-top:2px">🔬 Color Picker</button>
-                    <button class="tb-btn" id="eraserBtn" onclick="toggleEraser()" style="width:100%;margin-top:4px">⬜ Eraser</button>
+        <!-- SHARED: Color picker -->
+        <div id="colorSection">
+            <div class="panel-title">Color</div>
+            <div class="color-picker-wrap">
+                <div class="color-preview" id="colorPreview" onclick="document.getElementById('colorInput').click()">
+                    <input type="color" id="colorInput" value="#ff0000">
+                </div>
+                <div class="rgb-row">
+                    <div class="rgb-input"><label>R</label><input type="number" id="rVal" min="0" max="255" value="255"></div>
+                    <div class="rgb-input"><label>G</label><input type="number" id="gVal" min="0" max="255" value="0"></div>
+                    <div class="rgb-input"><label>B</label><input type="number" id="bVal" min="0" max="255" value="0"></div>
+                </div>
+                <button class="tb-btn mode-btn eyedropper-btn" onclick="toggleEyedropper()" style="width:100%;margin-top:2px">🔬 Color Picker</button>
+                <button class="tb-btn" id="eraserBtn" onclick="toggleEraser()" style="width:100%;margin-top:4px">⬜ Eraser</button>
+            </div>
+        </div>
+
+        <!-- FLASH MODE left extras (empty — actions are in right panel) -->
+        <div id="staticLeft" style="margin-top:12px"></div>
+
+        <!-- LAYERS MODE left panel -->
+        <div id="layersLeft" style="display:none;margin-top:12px" class="layers-left">
+            <div class="panel-title" style="margin-bottom:10px">Active Layer</div>
+            <div style="font-size:0.6rem;color:var(--dim);margin-bottom:10px;line-height:1.7">
+                Select a layer below to edit it.<br>Paint keys directly onto the active layer.
+            </div>
+            <div class="panel-title" style="margin-bottom:8px">Layer Type</div>
+            <div class="layer-type-group" id="layerTypeBtns">
+                <button class="layer-type-btn active-mode" data-type="static"    onclick="setActiveLayerType('static')">✏️ STATIC</button>
+                <button class="layer-type-btn"             data-type="animation" onclick="setActiveLayerType('animation')">🎬 ANIM</button>
+                <button class="layer-type-btn"             data-type="reactive"  onclick="setActiveLayerType('reactive')">⚡ REACTIVE</button>
+            </div>
+            <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Preview</div>
+            <div class="layer-type-group">
+                <button class="layer-type-btn" id="leftViewSingle"    onclick="setLayerViewMode('layer')">ACTIVE</button>
+                <button class="layer-type-btn" id="leftViewComposite" onclick="setLayerViewMode('composite')">ALL LAYERS</button>
+            </div>
+            <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.6">
+                ACTIVE — selected layer only<br>ALL LAYERS — composite preview
+            </div>
+            <div style="margin-top:12px">
+                <button class="tb-btn danger" style="width:100%" onclick="clearAllLayers()">✕ CLEAR ALL LAYERS</button>
+            </div>
+        </div>
+
+        <!-- SHARED: Swatches + Recent -->
+        <div style="margin-top:12px">
+            <div class="swatch-tabs">
+                <button class="swatch-tab active-tab" id="swatchTabBtn" onclick="switchSwatchTab('swatches')">Swatches</button>
+                <button class="swatch-tab" id="recentTabBtn" onclick="switchSwatchTab('recent')">Recent</button>
+            </div>
+            <div id="swatchesPane">
+                <div class="swatch-grid" id="swatchGrid"></div>
+            </div>
+            <div id="recentPane" style="display:none">
+                <div class="swatch-grid" id="recentGrid"></div>
+                <div id="recentEmpty" style="font-size:0.6rem;color:var(--dim);display:none">No recent colors yet</div>
+            </div>
+        </div>
+
+        <!-- SHARED: Selection panel -->
+        <div style="margin-top:12px" id="selPanel">
+            <div class="sel-empty">Click keys on the<br>keyboard to select</div>
+        </div>
+
+    </div>
+
+    <!-- CENTER: Keyboard -->
+    <div class="kb-area" id="kbArea">
+        <div class="kb-toolbar" id="kbToolbar">
+            <div class="mode-btn-group">
+                <button class="tb-btn mode-btn active-mode" id="selectModeBtn" onclick="setPaintMode(false)">⬚ SELECT</button>
+                <button class="tb-btn mode-btn"             id="paintModeBtn"  onclick="setPaintMode(true)">✏️ PAINT</button>
+            </div>
+            <button class="tb-btn" id="selectAllBtn" onclick="selectAll()">SELECT ALL</button>
+            <button class="tb-btn" id="deselectBtn"  onclick="clearSelection()">DESELECT</button>
+            <button class="tb-btn danger"            onclick="clearAll()">CLEAR ALL</button>
+            <div class="mode-btn-group" id="topModeGroup">
+                <button class="tb-btn mode-btn active-mode" id="staticModeBtn"  onclick="switchTopMode('static')">💾 FLASH</button>
+                <button class="tb-btn mode-btn"             id="layersPanelBtn" onclick="switchTopMode('layers')">⚡ LAYERS</button>
+            </div>
+            <span class="selection-info" id="selInfo">0 keys selected</span>
+        </div>
+
+        <div class="keyboard" id="keyboard"></div>
+
+        <!-- Layer strip -->
+        <div id="layerStripWrap" class="layer-strip-wrap" style="display:none">
+            <div class="layer-strip-label">
+                <span>LAYERS &nbsp;<span id="layerCountLabel" style="color:var(--text);font-size:0.7rem">0</span></span>
+                <span style="font-size:0.5rem;color:var(--dim);margin-left:6px" title="Drag cards to reorder">⇄ drag to reorder</span>
+                <div class="view-btns">
+                    <button class="tb-btn" id="layerViewComposite" onclick="setLayerViewMode('composite')" style="font-size:0.55rem;padding:3px 8px">ALL</button>
+                    <button class="tb-btn" id="layerViewSingle"    onclick="setLayerViewMode('layer')"     style="font-size:0.55rem;padding:3px 8px">ACTIVE</button>
                 </div>
             </div>
+            <div class="layer-strip" id="layerStrip"></div>
+        </div>
 
-            <!-- STATIC MODE extras -->
-            <div id="staticLeft" style="margin-top:12px">
+        <!-- Frame timeline (shown when an animation layer is selected) -->
+        <div id="timelineWrap" class="timeline-wrap" style="display:none">
+            <div class="timeline-label">
+                <span>FRAMES &nbsp;<span id="animFrameCount" style="color:var(--text);font-size:0.7rem">0</span></span>
+                <span id="totalDurationLabel" style="color:var(--text)">0ms total</span>
+            </div>
+            <div class="timeline" id="animTimeline">
+                <button class="add-frame-btn" onclick="addFrame()" title="Add frame">+</button>
+            </div>
+        </div>
+
+        <!-- Reactive effect selector -->
+        <div id="reactiveStripWrap" style="display:none;border-top:1px solid var(--border)">
+            <div class="timeline-label"><span>⚡ REACTIVE EFFECT</span></div>
+            <div class="timeline" id="reactiveEffectList"></div>
+            <div id="reactiveEffectSettings" style="padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center;min-height:44px"></div>
+        </div>
+
+        <div id="staticHint" style="font-size:0.62rem;color:var(--dim);line-height:1.8">
+            <b style="color:var(--muted)">CLICK</b> key to select &nbsp;·&nbsp;
+            <b style="color:var(--muted)">DRAG</b> to paint &nbsp;·&nbsp;
+            <b style="color:var(--muted)">APPLY COLOR</b> in left panel &nbsp;·&nbsp;
+            <b style="color:#2ecc71">SAVE TO FLASH</b> to persist after power cycle
+        </div>
+        <div id="layerHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
+            <b style="color:var(--accent)">SELECT A LAYER</b> below · then <b style="color:var(--muted)">PAINT</b> keys onto it
+        </div>
+    </div>
+
+    <!-- RIGHT panel -->
+    <div class="panel" id="rightPanel">
+
+        <!-- FLASH MODE right -->
+        <div id="staticRight">
+            <div class="panel-title" style="margin-top:4px">Flash to Keyboard</div>
+            <div style="font-size:0.6rem;color:var(--dim);margin-bottom:10px;line-height:1.7">
+                Writes colors to onboard memory.<br>
+                <b style="color:#2ecc71">Survives power cycle</b> — no software needed.
+            </div>
+            <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
+
+            <div class="panel-title" style="margin-top:14px;margin-bottom:8px">Save Preset</div>
+            <input type="text" class="anim-name-input" id="lightingNameInput" placeholder="Preset name..." value="My Lighting">
+            <div style="height:6px"></div>
+            <button class="apply-btn" onclick="saveStaticLighting()" style="font-size:0.68rem">💾 SAVE PRESET</button>
+
+            <div class="panel-title" style="margin-top:12px;margin-bottom:6px">Saved Presets</div>
+            <div id="savedLightingList" style="display:flex;flex-direction:column;gap:5px">
+                <div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>
+            </div>
+        </div>
+
+        <!-- LAYERS MODE right -->
+        <div id="layersRight" style="display:none" class="layers-right anim-side">
+
+            <div id="layerPlayControls" style="display:none">
+                <button class="play-btn" id="layerPlayBtn" onclick="togglePreview()" style="width:100%">▶ PREVIEW</button>
+                <div style="height:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
             </div>
 
-            <!-- ANIM MODE extras -->
-            <div id="animLeft" style="display:none;margin-top:12px">                <div class="frame-actions">
-                    <div class="panel-title" style="margin-bottom:8px">Frame Tools</div>
+            <!-- Frame editing tools — only shown when active layer is animation -->
+            <div id="layerAnimControls" style="display:none">
+                <div class="panel-title" style="margin-bottom:8px">Animation Layer</div>
+                <div class="duration-row" style="margin-bottom:8px">
+                    <label>DURATION</label>
+                    <input type="number" id="frameDuration" min="50" max="9999" value="100" oninput="updateFrameDuration()">
+                    <span>ms</span>
+                </div>
+                <div class="frame-actions" style="margin-bottom:8px">
                     <button class="tb-btn" onclick="duplicateFrame()">DUPLICATE FRAME</button>
                     <button class="tb-btn" onclick="clearFrame()">CLEAR FRAME</button>
-                    <button class="tb-btn" onclick="copyFromMain()">COPY FROM MAIN VIEW</button>
                     <button class="tb-btn danger" onclick="deleteFrame()">DELETE FRAME</button>
                 </div>
-                <div style="margin-top:14px">
-                    <div class="panel-title" style="margin-bottom:10px">Frame Settings</div>
-                    <div class="duration-row">
-                        <label>DURATION</label>
-                        <input type="number" id="frameDuration" min="50" max="9999" value="100" oninput="updateFrameDuration()">
-                        <span>ms</span>
-                    </div>
-                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px">50ms min recommended · 100ms = 10fps</div>
-                </div>
+                <div style="height:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
             </div>
 
-            <!-- LAYERS MODE extras (left panel) -->
-            <div id="layersLeft" style="display:none;margin-top:12px" class="layers-left">
-                <div class="panel-title" style="margin-bottom:10px">Active Layer</div>
-                <div style="font-size:0.6rem;color:var(--dim);margin-bottom:10px;line-height:1.7">
-                    Select a layer below to edit it.<br>Paint keys directly onto the active layer.
-                </div>
-                <div class="panel-title" style="margin-bottom:8px">Layer Type</div>
-                <div class="layer-type-group" id="layerTypeBtns">
-                    <button class="layer-type-btn active-mode" data-type="static" onclick="setActiveLayerType('static')">✏️ STATIC</button>
-                    <button class="layer-type-btn" data-type="animation" onclick="setActiveLayerType('animation')">🎬 ANIM</button>
-                    <button class="layer-type-btn" data-type="reactive" onclick="setActiveLayerType('reactive')">⚡ REACTIVE</button>
-                </div>
-                <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Preview</div>
-                <div class="layer-type-group">
-                    <button class="layer-type-btn" id="leftViewSingle" onclick="setLayerViewMode('layer')">ACTIVE</button>
-                    <button class="layer-type-btn" id="leftViewComposite" onclick="setLayerViewMode('composite')">ALL LAYERS</button>
-                </div>
-                <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.6">
-                    ACTIVE — edit view<br>ALL LAYERS — composite preview
-                </div>
-
-                <!-- Reactive layer settings moved to bottom strip -->
-
-                <div style="margin-top:12px">
-                    <button class="tb-btn danger" style="width:100%" onclick="clearAllLayers()">✕ CLEAR ALL LAYERS</button>
-                </div>
-            </div>
-
-            <!-- SHARED: Swatches + Recent (always visible) -->
-            <div style="margin-top:12px">
-                <div class="swatch-tabs">
-                    <button class="swatch-tab active-tab" id="swatchTabBtn" onclick="switchSwatchTab('swatches')">Swatches</button>
-                    <button class="swatch-tab" id="recentTabBtn" onclick="switchSwatchTab('recent')">Recent</button>
-                </div>
-                <div id="swatchesPane">
-                    <div class="swatch-grid" id="swatchGrid"></div>
-                </div>
-                <div id="recentPane" style="display:none">
-                    <div class="swatch-grid" id="recentGrid"></div>
-                    <div id="recentEmpty" style="font-size:0.6rem;color:var(--dim);display:none">No recent colors yet</div>
-                </div>
-            </div>
-
-            <!-- SHARED: Selection panel (always visible) -->
-            <div style="margin-top:12px" id="selPanel">
-                <div class="sel-empty">Click keys on the<br>keyboard to select</div>
-            </div>
-
-        </div>
-
-        <!-- CENTER: Keyboard -->
-        <div class="kb-area" id="kbArea">
-            <div class="kb-toolbar" id="kbToolbar">
-                <div class="mode-btn-group">
-                    <button class="tb-btn mode-btn active-mode" id="selectModeBtn" onclick="setPaintMode(false)">⬚ SELECT</button>
-                    <button class="tb-btn mode-btn" id="paintModeBtn" onclick="setPaintMode(true)">✏️ PAINT</button>
-                </div>
-                <button class="tb-btn" id="selectAllBtn" onclick="selectAll()">SELECT ALL</button>
-                <button class="tb-btn" id="deselectBtn" onclick="clearSelection()">DESELECT</button>
-                <button class="tb-btn danger" onclick="clearAll()">CLEAR ALL</button>
-                <div class="mode-btn-group" id="topModeGroup">
-                    <button class="tb-btn mode-btn active-mode" id="staticModeBtn" onclick="switchTopMode('static')">✏️ STATIC</button>
-                    <button class="tb-btn mode-btn" id="animToggleBtn" onclick="switchTopMode('animation')">🎬 ANIMATIONS</button>
-                    <button class="tb-btn mode-btn" id="layersPanelBtn" onclick="switchTopMode('layers')">⚡ LAYERS</button>
-                </div>
-                <span class="selection-info" id="selInfo">0 keys selected</span>
-            </div>
-
-            <div class="keyboard" id="keyboard"></div>
-
-            <!-- Timeline (hidden until anim mode) -->
-            <div id="timelineWrap" class="timeline-wrap" style="display:none">
-                <div class="timeline-label">
-                    <span>FRAMES &nbsp;<span id="animFrameCount" style="color:var(--text);font-size:0.7rem">0</span></span>
-                    <span id="totalDurationLabel" style="color:var(--text)">0ms total</span>
-                </div>
-                <div class="timeline" id="animTimeline">
-                    <button class="add-frame-btn" onclick="addFrame()" title="Add frame">+</button>
-                </div>
-            </div>
-
-            <!-- Layer strip (shown in layers mode, like timeline) -->
-            <div id="layerStripWrap" class="layer-strip-wrap" style="display:none">
-                <div class="layer-strip-label">
-                    <span>LAYERS &nbsp;<span id="layerCountLabel" style="color:var(--text);font-size:0.7rem">0</span></span>
-                    <span style="font-size:0.5rem;color:var(--dim);margin-left:6px" title="Drag cards to reorder layers">⇄ drag to reorder</span>
-                    <div class="view-btns">
-                        <button class="tb-btn" id="layerViewComposite" onclick="setLayerViewMode('composite')"
-                            style="font-size:0.55rem;padding:3px 8px" title="Show composite of all layers">ALL</button>
-                        <button class="tb-btn" id="layerViewSingle" onclick="setLayerViewMode('layer')"
-                            style="font-size:0.55rem;padding:3px 8px" title="Show active layer only">ACTIVE</button>
-                    </div>
-                </div>
-                <div class="layer-strip" id="layerStrip"></div>
-            </div>
-
-            <!-- Reactive effect selector (shown when a reactive layer is active) -->
-            <div id="reactiveStripWrap" style="display:none;border-top:1px solid var(--border)">
-                <div class="timeline-label">
-                    <span>⚡ REACTIVE EFFECT</span>
-                </div>
-                <div class="timeline" id="reactiveEffectList"></div>
-                <div id="reactiveEffectSettings" style="padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center;min-height:44px"></div>
-            </div>
-
-            <div id="staticHint" style="font-size:0.62rem;color:var(--dim);line-height:1.8">
-                <b style="color:var(--muted)">CLICK</b> key to select &nbsp;·&nbsp;
-                <b style="color:var(--muted)">DRAG</b> to paint &nbsp;·&nbsp;
-                <b style="color:var(--muted)">APPLY COLOR</b> in left panel
-            </div>
-            <div id="animHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
-                <b style="color:var(--accent2)">SELECT A FRAME</b> above · then <b style="color:var(--muted)">PAINT</b> keys
-            </div>
-            <div id="layerHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
-                <b style="color:var(--accent)">SELECT A LAYER</b> below · then <b style="color:var(--muted)">PAINT</b> keys onto it
-            </div>
-        </div>
-
-        <!-- RIGHT panel -->
-        <div class="panel" id="rightPanel">
-
-            <!-- STATIC MODE right -->
-            <div id="staticRight">
-                <div class="panel-title" style="margin-top:4px">Keyboard</div>
-                <button class="apply-btn" onclick="saveToFlash()" style="background:#1a3a2a;border:1px solid #2ecc71;color:#2ecc71">💾 SAVE TO FLASH</button>
-                <div style="font-size:0.6rem;color:var(--dim);margin-top:8px;line-height:1.7">
-                    <b style="color:var(--muted)">APPLY</b> streams colors live<br>
-                    <b style="color:var(--muted)">SAVE</b> burns to onboard flash<br>persists after power cycle
-                </div>
-
-                <div class="panel-title" style="margin-top:12px;margin-bottom:8px">Save Preset</div>
-                <input type="text" class="anim-name-input" id="lightingNameInput" placeholder="Preset name..." value="My Lighting">
+            <!-- Save current layer — always visible -->
+            <div>
+                <div class="panel-title" style="margin-bottom:6px">Save Current Layer</div>
+                <input type="text" class="anim-name-input" id="animNameInput" placeholder="Name...">
                 <div style="height:6px"></div>
-                <button class="apply-btn" onclick="saveStaticLighting()" style="font-size:0.68rem">💾 SAVE PRESET</button>
+                <button class="apply-btn" onclick="saveCurrentLayer()" style="font-size:0.68rem">💾 SAVE LAYER</button>
+            </div>
 
-                <div class="panel-title" style="margin-top:12px;margin-bottom:6px">Saved Presets</div>
-                <div id="savedLightingList" style="display:flex;flex-direction:column;gap:5px">
+            <!-- Load Layer — unified dropdown by type -->
+            <div>
+                <div class="panel-title" style="margin-bottom:8px">Load Layer</div>
+                <div class="layer-picker-row" style="margin-bottom:6px">
+                    <select id="loadLayerTypeSelect" class="layer-picker-select" onchange="refreshLoadLayerList()">
+                        <option value="static">Static presets</option>
+                        <option value="animation">Animations</option>
+                        <option value="reactive">Reactive layers</option>
+                    </select>
+                </div>
+                <div id="loadLayerList" style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
                     <div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>
                 </div>
             </div>
 
-            <!-- ANIM MODE right -->
-            <div id="animRight" style="display:none;flex-direction:column;gap:16px">
-                <div>
-                    <div class="panel-title" style="margin-bottom:10px">Playback</div>
-                    <div class="loop-row">
-                        <input type="checkbox" id="loopAnim" checked>
-                        <label for="loopAnim">Loop animation</label>
-                    </div>
-                    <div style="height:8px"></div>
-                    <button class="play-btn" id="playBtn" onclick="togglePreview()">▶ PREVIEW</button>
-                    <div style="font-size:0.6rem;color:var(--dim);margin-top:6px" id="playStatus">Stopped</div>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:10px">Save Animation</div>
-                    <input type="text" class="anim-name-input" id="animNameInput" placeholder="Animation name..." value="My Animation">
-                    <div style="height:8px"></div>
-                    <button class="apply-btn" onclick="saveAnimation()" style="font-size:0.68rem">💾 SAVE TO FILE</button>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:6px">Saved Animations</div>
-                    <div id="savedAnimList" style="display:flex;flex-direction:column;gap:5px">
-                        <div style="font-size:0.6rem;color:var(--dim)">No saved animations</div>
-                    </div>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:8px">Active Animation</div>
-                    <button class="play-btn" id="activeAnimBtn" onclick="setAsActiveAnimation()" style="width:100%;margin-bottom:6px">▶ SET AS ACTIVE</button>
-                    <div style="font-size:0.58rem;color:var(--dim);line-height:1.7" id="activeAnimStatus"></div>
-                    <div style="font-size:0.58rem;color:var(--dim);margin-top:6px;line-height:1.7">
-                        Loops on keyboard continuously.<br>Saved as <b style="color:var(--muted)">current_animation.json</b><br>for auto-boot in a future update.
-                    </div>
+            <div>
+                <div class="panel-title" style="margin-bottom:8px">Push to Keyboard</div>
+                <button class="apply-btn" onclick="pushLayersToKeyboard()" style="margin-bottom:6px">⚡ APPLY LAYERS</button>
+                <div style="font-size:0.6rem;color:var(--dim);line-height:1.7">
+                    Streams the full composite continuously to the keyboard.
                 </div>
             </div>
-            <!-- LAYERS MODE right -->
-            <div id="layersRight" style="display:none" class="layers-right anim-side">
 
-                <!-- Shown only when an anim layer is active -->
-                <div id="layerAnimControls" style="display:none">
-                    <div class="panel-title" style="margin-bottom:8px">Layer Animation</div>
-                    <div class="loop-row">
-                        <input type="checkbox" id="layerLoopAnim" checked onchange="_syncLayerLoop(this.checked)">
-                        <label for="layerLoopAnim">Loop</label>
-                    </div>
-                    <div style="height:6px"></div>
-                    <button class="play-btn" id="layerPlayBtn" onclick="togglePreview()" style="width:100%">▶ PREVIEW</button>
-                    <div style="height:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
+            <div>
+                <div class="panel-title" style="margin-bottom:8px">Save Preset</div>
+                <input type="text" class="anim-name-input" id="layerPresetNameInput" placeholder="Preset name..." value="My Layers">
+                <div style="height:6px"></div>
+                <button class="apply-btn" onclick="saveLayerPreset()" style="font-size:0.68rem">💾 SAVE LAYERS</button>
+            </div>
+
+            <div>
+                <div class="panel-title" style="margin-bottom:6px">Saved Presets</div>
+                <div id="savedLayersList" style="display:flex;flex-direction:column;gap:5px">
+                    <div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>
                 </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:10px">Add Layer</div>
-                    <div class="layer-picker-row" style="margin-bottom:6px">
-                        <button class="layer-add-btn anim-btn" onclick="addAnimLayerFromCurrent()" style="flex:1;text-align:center">+ CURRENT ANIM</button>
-                    </div>
-                    <div class="layer-picker-row" style="margin-bottom:10px">
-                        <button class="layer-add-btn" onclick="addStaticLayerFromCurrent()" style="flex:1;text-align:center">+ CURRENT STATIC</button>
-                    </div>
-                    <div class="layer-picker-row">
-                        <select id="layerAnimSelect" class="layer-picker-select">
-                            <option value="">— saved animation —</option>
-                        </select>
-                        <button class="layer-add-btn anim-btn" onclick="addLayerFromSavedAnim()">ADD</button>
-                    </div>
-                    <div style="height:6px"></div>
-                    <div class="layer-picker-row">
-                        <select id="layerStaticSelect" class="layer-picker-select">
-                            <option value="">— saved preset —</option>
-                        </select>
-                        <button class="layer-add-btn" onclick="addLayerFromSavedStatic()">ADD</button>
-                    </div>
-                    <div style="height:8px"></div>
-                    <button class="apply-btn" onclick="addBlankLayer()" style="font-size:0.68rem">+ BLANK LAYER</button>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:8px">Push to Keyboard</div>
-                    <button class="apply-btn" onclick="pushLayersToKeyboard()" style="margin-bottom:6px">⚡ APPLY LAYERS</button>
-                    <div style="font-size:0.6rem;color:var(--dim);line-height:1.7">
-                        Switches to ALL LAYERS view and streams the full composite continuously to the keyboard.
-                    </div>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:8px">Save Preset</div>
-                    <input type="text" class="anim-name-input" id="layerPresetNameInput" placeholder="Preset name..." value="My Layers">
-                    <div style="height:6px"></div>
-                    <button class="apply-btn" onclick="saveLayerPreset()" style="font-size:0.68rem">💾 SAVE LAYERS</button>
-                </div>
-
-                <div>
-                    <div class="panel-title" style="margin-bottom:6px">Saved Presets</div>
-                    <div id="savedLayersList" style="display:flex;flex-direction:column;gap:5px">
-                        <div style="font-size:0.6rem;color:var(--dim)">No saved presets</div>
-                    </div>
-                </div>
-
             </div>
 
         </div>
-    </main>
 
-    <footer>
-        <span>AULA F108 Pro Driver UI</span>
-        <span class="footer-tag">·</span>
-        <span>VID:0C45 · PID:800A · Interface 3 · ff13/0001</span>
-        <span class="footer-tag">·</span>
-        <span id="colorCount">0 keys lit</span>
-    </footer>
+    </div>
+</main>
 
-    <div id="toast"></div>
-    <input type="file" id="loadFileInput" accept=".json" style="display:none" onchange="loadAnimationFile(event)">
+<footer>
+    <span>AULA F108 Pro Driver UI</span>
+    <span class="footer-tag">·</span>
+    <span>VID:0C45 · PID:800A · Interface 3 · ff13/0001</span>
+    <span class="footer-tag">·</span>
+    <span id="colorCount">0 keys lit</span>
+</footer>
 
-    <script src="layout.js"></script>
-    <script src="main.js"></script>
-    <script src="anim.js"></script>
-    <script src="layers.js"></script>
-    <script>
-        function switchTopMode(mode) {
-            // Always deactivate eraser when switching modes
-            if (typeof deactivateEraser === 'function') deactivateEraser();
-            // Close whichever mode is currently open
-            if (layersPanelOpen) {
-                closeLayersPanel();
-            } else if (activeMode === modes.animation) {
-                closeAnimPanel();
-            }
-            // Open the requested mode (if not static)
-            if (mode === 'animation') openAnimPanel();
-            else if (mode === 'layers') openLayersPanel();
-            // static just falls through — closeX already restored static view
-            _syncTopModeBtns(mode);
-        }
+<div id="toast"></div>
 
-        function _syncTopModeBtns(mode) {
-            document.getElementById('staticModeBtn')?.classList.toggle('active-mode', mode === 'static');
-            document.getElementById('animToggleBtn')?.classList.toggle('active-mode', mode === 'animation');
-            document.getElementById('layersPanelBtn')?.classList.toggle('active-mode', mode === 'layers');
-        }
-
-        // Patch open/close in anim.js and layers.js to always sync the group
-        const _origOpenAnim  = openAnimPanel;
-        const _origCloseAnim = closeAnimPanel;
-        const _origOpenLay   = openLayersPanel;
-        const _origCloseLay  = closeLayersPanel;
-
-        openAnimPanel   = function() { _origOpenAnim();  _syncTopModeBtns('animation'); };
-        closeAnimPanel  = function() { _origCloseAnim(); _syncTopModeBtns('static'); };
-        openLayersPanel = function() { _origOpenLay();   _syncTopModeBtns('layers'); };
-        closeLayersPanel= function() { _origCloseLay();  _syncTopModeBtns('static'); };
-
-        // Refresh saved pickers when disk data loads
-        const _origLoadAnims = loadAnimationsFromDisk;
-        loadAnimationsFromDisk = async function() {
-            await _origLoadAnims.apply(this, arguments);
-            if (typeof refreshLayerPickers === 'function') refreshLayerPickers();
-        };
-        const _origLoadStatic = loadStaticLightingsFromDisk;
-        loadStaticLightingsFromDisk = async function() {
-            await _origLoadStatic.apply(this, arguments);
-            if (typeof refreshLayerPickers === 'function') refreshLayerPickers();
-        };
-
-        function pushLayersToKeyboard() {
-            setLayerViewMode('composite');
-            const needsStream = layers.some(l => l.enabled && (l.type === 'animation' || l.type === 'reactive'));
-            if (needsStream) {
-                applyLayersActive = true;
-                _startAllLayerAnims();
-                stopCompositor();
-                startCompositor();
-                _syncAllPlayBtns(true);
-                _syncReactiveConfig();
-                toast('⚡ Layers streaming to keyboard');
-            } else {
-                applyLayersActive = false;
-                _sendStaticSnapshot();
-                toast('⚡ Layers applied to keyboard (static)');
-            }
-            if (hasPyAPI()) {
-                window.pywebview.api.save_current_layers(_serializeLayers());
-            }
-        }
-    </script>
+<script src="layout.js"></script>
+<script src="main.js"></script>
+<script src="flash.js"></script>
+<script src="layers.js"></script>
+<script>
+    // Refresh load layer list when flash presets reload
+    const _origLoadStatic = loadStaticLightingsFromDisk;
+    loadStaticLightingsFromDisk = async function() {
+        await _origLoadStatic.apply(this, arguments);
+        if (typeof refreshLoadLayerList === 'function') refreshLoadLayerList();
+    };
+</script>
 
 </body>
 </html>

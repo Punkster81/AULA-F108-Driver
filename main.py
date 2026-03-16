@@ -220,6 +220,16 @@ def layers_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
+def reactive_dir():
+    """Returns (and creates if needed) the 'reactive' folder next to main.py / the exe."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, 'reactive')
+    os.makedirs(d, exist_ok=True)
+    return d
+
 class AnimationAPI:
     def save_current_animation(self, data):
         """Save animation as current_animation.json and also write current.json pointer."""
@@ -403,6 +413,45 @@ class AnimationAPI:
             return {'ok': False, 'message': str(e)}
 
     # ── Layer presets ──────────────────────────────────────────────────────────
+    def save_reactive_preset(self, name, data):
+        try:
+            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'reactive'
+            fname = safe.replace(' ', '_').lower() + '.json'
+            data['name'] = name
+            path = os.path.join(reactive_dir(), fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def list_reactive_presets(self):
+        try:
+            results = []
+            d = reactive_dir()
+            for fname in sorted(os.listdir(d)):
+                if not fname.lower().endswith('.json'):
+                    continue
+                try:
+                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    data['_filename'] = fname
+                    results.append(data)
+                except Exception:
+                    pass
+            return {'ok': True, 'presets': results}
+        except Exception as e:
+            return {'ok': False, 'presets': [], 'message': str(e)}
+
+    def delete_reactive_preset(self, filename):
+        try:
+            path = os.path.join(reactive_dir(), os.path.basename(filename))
+            if os.path.exists(path):
+                os.remove(path)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
     def save_layer_preset(self, name, data):
         """
         Save a layer stack to layers/<name>.json.

@@ -12,11 +12,17 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 ## Features
 
 - Full per-key RGB control
-- Live streaming (~10fps) with no flicker
-- Save colors to onboard flash (persists after power cycle)
-- Custom animation editor with frame timeline
-- Save/load animations as JSON
-- Layer system — stack static and animated layers with per-layer opacity and transparency
+- **Flash mode** — burn static colors to onboard memory, persists after power cycle (no software needed)
+- **Layer system** — stack unlimited layers with per-layer opacity and blending
+  - Static layers — per-key color maps
+  - Animation layers — frame timeline with per-frame colors and durations
+  - Reactive layers — keypress-driven effects (see below)
+- **Reactive effects** — per-key colors triggered by keypresses, easily extensible
+  - Key Highlight — pressed key lights up and fades on release
+  - Ripple — expanding ring from keypress
+  - Meteor — light falls from top row down to the pressed key with trail
+  - Lightning — entire column flashes instantly on press
+- Save/load layer presets, animations, and flash presets as JSON files
 - Native desktop app (PyWebView — no browser needed)
 
 ## Hardware
@@ -35,8 +41,8 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 **Requirements:** Python 3.8+, Windows
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/aula-f108-driver
-cd aula-f108-driver
+git clone https://github.com/Punkster81/AULA-F108-Driver
+cd AULA-F108-Driver
 pip install -r requirements.txt
 python main.py
 ```
@@ -52,25 +58,96 @@ Download the latest `aula_driver.exe` from [Releases](../../releases) — no Pyt
 ## Project structure
 
 ```
-aula-f108-driver/
-├── main.py                   # PyWebView app entry point + keyboard API bridge
-├── aula_f108_pro_final.py    # Low-level HID driver (Win32 DeviceIoControl)
+AULA-F108-Driver/
+├── main.py                    # PyWebView app entry point + Python API bridge
+├── driver.py                  # Background HID + keyboard hook process
+├── aula_f108_pro_final.py     # Low-level HID protocol (Win32 DeviceIoControl)
 ├── requirements.txt
-├── ui/
-│   ├── index.html            # App UI
-│   ├── main.css              # Main styles
-│   ├── anim.css              # Animation editor styles
-│   ├── layers.css            # Layer system styles
-│   ├── layout.js             # Keyboard layout data (ROWS, NAV, NUMPAD)
-│   ├── main.js               # Main UI logic
-│   ├── anim.js               # Animation editor logic
-│   └── layers.js             # Layer system logic
-└── .github/
-    └── workflows/
-        └── build.yml         # Auto-builds exe on release tag
+└── ui/
+    ├── index.html             # App shell
+    ├── main.css               # Core styles
+    ├── anim.css               # Timeline / frame editor styles
+    ├── layers.css             # Layer strip and card styles
+    ├── layout.js              # Keyboard layout data (ROWS, NAV, NUMPAD)
+    ├── main.js                # Color picker, keyboard builder, selection, PyWebView bridge
+    ├── flash.js               # Flash-to-memory tab (save colors to onboard storage)
+    └── layers.js              # Layer system, compositor, animation editor, reactive effects
 ```
 
-## Building the exe yourself
+### Why two JS files instead of three?
+
+The old `anim.js` standalone animation tab has been merged into `layers.js`. Animations are now just a layer type — you add an animation layer inside the Layers panel and edit its frames there. This eliminates duplicated compositor logic and makes animations compositable with other layers.
+
+`flash.js` stays separate because it is the only mode that writes to keyboard onboard memory. It is intentionally distinct from the live-streaming layer system.
+
+---
+
+## Two-mode design
+
+### 💾 Flash
+Writes colors directly to the keyboard's onboard flash memory. Colors survive power cycles — the keyboard shows them even with no software running. Use this for your "default" keyboard appearance.
+
+### ⚡ Layers
+Streams a live composite frame to the keyboard at ~30fps. Layers are stacked bottom-to-top. Any combination of static, animation, and reactive layers can be mixed. The full composite is sent to hardware via shared memory — the driver just writes it, no separate reactive engine running on the driver side.
+
+---
+
+## Architecture
+
+```
+main.py (UI process)
+  └─ spawns driver.py (background process)
+
+Shared memory:
+  AulaF108Frame  — UI writes compositor frames → driver reads and sends to HW
+  AulaF108Keys   — driver writes key events → UI reads for reactive display
+
+UI JS stack (load order):
+  layout.js   → key geometry constants
+  main.js     → color state, keyboard DOM, mode registry
+  flash.js    → flash-to-memory tab logic
+  layers.js   → layer system, compositor, all effects
+```
+
+### Adding a new reactive effect
+
+Open `layers.js` and add one entry to the `Effects` object:
+
+```js
+const Effects = {
+    // ... existing effects ...
+
+    myEffect: {
+        label: 'My Effect',
+        icon:  '✨',
+        desc:  'Does something cool',
+        defaults: { fadeDuration: 600, myParam: 1.0 },
+        initRippleState: () => ([]),
+        onPress(state, idx, color, now, layer)  { /* push to state */ },
+        onRelease(state, idx, now)              { /* mark release */ },
+        snapshot(layer, now)                   { /* return {idx:{r,g,b}} */ },
+        prune(layer, now)                      { /* remove expired entries */ },
+        settingsHTML(layer)                    { /* return HTML string */ },
+        serializeExtra(layer)                  { return { myParam: layer.myParam ?? 1.0 }; },
+    },
+};
+```
+
+That's it. The effect card appears in the UI automatically, the poller routes keypresses to it automatically, and it serializes/deserializes automatically. Nothing else needs changing.
+
+You also need to add the same effect logic to `driver.py` so the hardware matches the display — add a `_apply_myEffect` method and wire it into `_build_reactive_frame` and `_on_key_event`.
+
+---
+
+## Protocol notes
+
+The keyboard uses a Sinowealth 8051 controller. All communication goes through USB HID feature reports on interface 3 (`usage_page=0xff13`). Standard `hidapi` won't work on Windows — you must use `DeviceIoControl` with `IOCTL_HID_SET_FEATURE` / `IOCTL_HID_GET_FEATURE`.
+
+Key protocol details are documented in `aula_f108_pro_final.py`.
+
+---
+
+## Building the exe
 
 ```bash
 pip install pyinstaller
@@ -80,24 +157,9 @@ pyinstaller --onefile --windowed --add-data "ui;ui" --name aula_driver main.py
 
 ---
 
-## Layer system
-
-The layer system lets you stack multiple lighting layers on top of each other, composited in real time.
-
-- **Static layers** — per-key colors painted directly onto the layer
-- **Animation layers** — full frame-timeline animations running independently per layer
-- **Opacity** — each layer has a 0–100% opacity slider for blending
-- **Transparency** — keys with no color set on a layer are transparent; the layer below shows through. Black (`0,0,0`) counts as a real color — use the Eraser tool to make a key transparent
-- **View modes** — toggle between editing a single layer in isolation or previewing the full composite
-- **Three editing modes** in the toolbar: ✏️ Static, 🎬 Animations, ⚡ Layers
-
----
-
 ## Protocol notes
 
-The keyboard uses a Sinowealth 8051 controller. All communication goes through USB HID
-feature reports on interface 3 (`usage_page=0xff13`). Standard `hidapi` won't work on
-Windows — you must use `DeviceIoControl` with `IOCTL_HID_SET_FEATURE` / `IOCTL_HID_GET_FEATURE`.
+The keyboard uses a Sinowealth 8051 controller. All communication goes through USB HID feature reports on interface 3 (`usage_page=0xff13`). Standard `hidapi` won't work on Windows — you must use `DeviceIoControl` with `IOCTL_HID_SET_FEATURE` / `IOCTL_HID_GET_FEATURE`.
 
 Key protocol details are documented in `aula_f108_pro_final.py`.
 
@@ -143,13 +205,11 @@ Key protocol details are documented in `aula_f108_pro_final.py`.
 
 ---
 
-## Contributing
-
 PRs welcome. Key areas that would benefit from contributions:
 
-- Capture and reverse-engineer built-in effect commands (breathing, wave, ripple)
+- New reactive effects (see "Adding a new reactive effect" above)
+- Capture and reverse-engineer built-in effect commands (breathing, wave, ripple) from official software
 - macOS / Linux support investigation
-- Keypress-reactive lighting effects
 
 ## License
 
