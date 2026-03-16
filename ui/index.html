@@ -141,7 +141,7 @@
                 <button class="tb-btn mode-btn active-mode" id="staticModeBtn"  onclick="switchTopMode('static')">💾 FLASH</button>
                 <button class="tb-btn mode-btn"             id="layersPanelBtn" onclick="switchTopMode('layers')">⚡ LAYERS</button>
             </div>
-            <span class="selection-info" id="selInfo">0 keys selected</span>
+            <span class="selection-info" id="selInfo" style="display:none">0 keys selected</span>
         </div>
 
         <div class="keyboard" id="keyboard"></div>
@@ -167,6 +167,20 @@
             </div>
             <div class="timeline" id="animTimeline">
                 <button class="add-frame-btn" onclick="addFrame()" title="Add frame">+</button>
+            </div>
+        </div>
+
+        <!-- Animation layer settings (shown below frame list, like reactive settings) -->
+        <div id="animSettingsWrap" style="display:none;border-top:1px solid var(--border)">
+            <div style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+                <div class="duration-row">
+                    <label>DURATION</label>
+                    <input type="number" id="frameDuration" min="50" max="9999" value="100" oninput="updateFrameDuration()">
+                    <span>ms</span>
+                </div>
+                <button class="tb-btn" onclick="duplicateFrame()">DUPLICATE</button>
+                <button class="tb-btn" onclick="clearFrame()">CLEAR</button>
+                <button class="tb-btn danger" onclick="deleteFrame()">DELETE</button>
             </div>
         </div>
 
@@ -216,22 +230,6 @@
 
             <div id="layerPlayControls" style="display:none">
                 <button class="play-btn" id="layerPlayBtn" onclick="togglePreview()" style="width:100%">▶ PREVIEW</button>
-                <div style="height:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
-            </div>
-
-            <!-- Frame editing tools — only shown when active layer is animation -->
-            <div id="layerAnimControls" style="display:none">
-                <div class="panel-title" style="margin-bottom:8px">Animation Layer</div>
-                <div class="duration-row" style="margin-bottom:8px">
-                    <label>DURATION</label>
-                    <input type="number" id="frameDuration" min="50" max="9999" value="100" oninput="updateFrameDuration()">
-                    <span>ms</span>
-                </div>
-                <div class="frame-actions" style="margin-bottom:8px">
-                    <button class="tb-btn" onclick="duplicateFrame()">DUPLICATE FRAME</button>
-                    <button class="tb-btn" onclick="clearFrame()">CLEAR FRAME</button>
-                    <button class="tb-btn danger" onclick="deleteFrame()">DELETE FRAME</button>
-                </div>
                 <div style="height:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
             </div>
 

@@ -522,7 +522,15 @@ function selectLayer(id) {
 }
 function moveLayerUp(id)   { const i=layers.findIndex(l=>l.id===id); if(i<=0)return; [layers[i-1],layers[i]]=[layers[i],layers[i-1]]; renderLayerStrip(); }
 function moveLayerDown(id) { const i=layers.findIndex(l=>l.id===id); if(i<0||i>=layers.length-1)return; [layers[i],layers[i+1]]=[layers[i+1],layers[i]]; renderLayerStrip(); }
-function clearAllLayers()  { layers.forEach(l=>_stopLayerAnim(l)); layers=[];activeLayerId=null; renderLayerStrip();_refreshKeyboard(); if(hasPyAPILayers())window.pywebview.api.clear(); if(typeof toast==='function')toast('All layers cleared'); }
+function clearAllLayers() {
+    if (_layerAnimActive) _unmountLayerAnimEditor(true);
+    layers.forEach(l=>_stopLayerAnim(l));
+    layers=[]; activeLayerId=null;
+    addLayer('static','Layer 1',{colors:{}});
+    _refreshKeyboard();
+    if(hasPyAPILayers())window.pywebview.api.clear();
+    if(typeof toast==='function')toast('All layers cleared');
+}
 function toggleLayerEnabled(id) {
     const layer=layers.find(l=>l.id===id); if(!layer)return;
     layer.enabled=!layer.enabled;
@@ -669,7 +677,12 @@ function _stopAllPlayback() {
     applyLayersActive=false; isPlaying=false;
     clearTimeout(previewTimer);
     _stopAllLayerAnims();
-    layers.forEach(l=>{if(l.type==='reactive'){l._reactiveColors={};l._ripples=[];}});
+    // Reset all animation layers to frame 0
+    layers.forEach(l => {
+        if (l.type==='animation') l._frameIdx=0;
+        if (l.type==='reactive') { l._reactiveColors={}; l._ripples=[]; }
+    });
+    if (_layerAnimActive && animFrames?.length) selectAnimFrame(0);
     _syncReactiveConfig();
     _syncAllPlayBtns(false);
 }
@@ -784,7 +797,6 @@ function renderLayerStrip() {
         const typeIcon=layer.type==='animation'?'🎬':layer.type==='reactive'?'⚡':'✏️';
         const effectTag=layer.type==='reactive'?(layer.effect||'highlight'):layer.type==='animation'?`${layer.frames?.length||0}f`:'';
         card.innerHTML=`<div class="layer-card-top" draggable="true">
-                <span class="lc-drag" style="cursor:grab;color:var(--dim);font-size:0.7rem;padding:0 2px">⠿</span>
                 <span class="lc-num">${i+1}</span><span class="lc-icon">${typeIcon}</span>
                 <span class="lc-name" title="Double-click to rename">${layer.name}</span>
                 ${effectTag?`<span class="lc-meta">${effectTag}</span>`:''}
@@ -947,14 +959,17 @@ function _mountLayerAnimEditor(layer) {
     _layerAnimActive=true; animFrames=layer.frames;
     activeAnimFrame=layer._frameIdx||0;
     document.getElementById('timelineWrap').style.display='block';
-    document.getElementById('layerAnimControls').style.display='block';
-    renderTimeline(); _updateAnimFrameCount(); _syncLayerAnimControls();
+    document.getElementById('animSettingsWrap').style.display='block';
+    renderTimeline(); _updateAnimFrameCount();
+    selectAnimFrame(activeAnimFrame); // updates duration input + highlights active frame
+    _syncLayerAnimControls();
 }
 function _unmountLayerAnimEditor(fullyStop=false) {
     if(fullyStop){stopPreview();_stopAllLayerAnims();}
     _layerAnimActive=false; animFrames=[]; activeAnimFrame=-1;
-    document.getElementById('layerAnimControls').style.display='none';
+    const el=document.getElementById('layerAnimControls'); if(el)el.style.display='none';
     document.getElementById('layerPlayControls').style.display='none';
+    document.getElementById('animSettingsWrap').style.display='none';
     document.getElementById('timelineWrap').style.display='none';
 }
 function _syncLayerAnimControls() {
@@ -967,9 +982,7 @@ function _syncLayerAnimControls() {
     const playEl = document.getElementById('layerPlayControls');
     if (playEl) playEl.style.display = showPlay ? 'block' : 'none';
 
-    // Frame edit tools: only when active layer is animation
-    const editEl = document.getElementById('layerAnimControls');
-    if (editEl) editEl.style.display = isAnimLayer ? 'block' : 'none';
+    // animSettingsWrap is shown/hidden by _mountLayerAnimEditor directly
 
     // Update save name input
     const nameEl = document.getElementById('animNameInput');
@@ -1052,7 +1065,7 @@ function copyFromMain()   { if(activeAnimFrame<0){if(typeof toast==='function')t
 function _syncAllPlayBtns(playing) {
     ['playBtn','layerPlayBtn'].forEach(id=>{const btn=document.getElementById(id);if(!btn)return;btn.textContent=playing?'■ STOP':'▶ PREVIEW';btn.classList.toggle('playing',playing);});
 }
-function _syncLayerLoop() {} // loop is always true — kept for compatibility
+// loop is always true on all animation layers
 function togglePreview() {
     if(applyLayersActive||isPlaying){_stopAllPlayback();return;}
     // In composite view: preview all animation layers in the stack
@@ -1064,14 +1077,7 @@ function togglePreview() {
     isPlaying=true; _syncAllPlayBtns(true); _startAllLayerAnims(); _previewLoop();
 }
 function stopPreview() {
-    isPlaying=false; clearTimeout(previewTimer); _syncAllPlayBtns(false);
-    if (!applyLayersActive) {
-        _stopAllLayerAnims();
-        // Show the currently selected frame
-        if (_layerAnimActive && activeAnimFrame >= 0) {
-            selectAnimFrame(activeAnimFrame);
-        }
-    }
+    _stopAllPlayback();
     _sendLayersSnapshot();
 }
 function _previewLoop() {
@@ -1082,6 +1088,7 @@ function _previewLoop() {
 
 // ── Save / Load animations ────────────────────────────────────────────────────
 let savedAnimations={};
+let savedReactivePresets={};
 async function saveCurrentLayer() {
     const layer = getActiveLayer();
     if (!layer) { if(typeof toast==='function') toast('No layer selected'); return; }
