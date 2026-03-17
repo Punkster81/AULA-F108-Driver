@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.2'
+VERSION = 'v1.0.3'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -152,8 +152,9 @@ def _first_run_install():
 timeout /t 3 /nobreak >nul
 copy /y "{src}" "{install_path}"
 powershell -NonInteractive -Command "{ps_cmd}"
-del "{src}"
 start "" "{install_path}"
+timeout /t 2 /nobreak >nul
+del /f /q "{src}"
 del "%~f0"
 '''
     os.makedirs(install_dir, exist_ok=True)
