@@ -126,11 +126,8 @@ JS load order:
 3. Tag the release:
 
 ```bash
-git add .
-git commit -m "your message"
-git push
 git tag v1.1.0
-git push --tags 
+git push --tags
 ```
 
 GitHub Actions builds the exe on Windows and attaches it to the release automatically. Users running the app will see an update prompt on next launch.
@@ -141,12 +138,13 @@ GitHub Actions builds the exe on Windows and attaches it to the release automati
 pip install pyinstaller
 pyinstaller --onefile --windowed \
   --add-data "ui;ui" \
-  --add-data "driver.py;." \
-  --add-data "aula_f108_pro_final.py;." \
+  --icon "icon.ico" \
   --name aula_driver \
   main.py
 # Output: dist/aula_driver.exe
 ```
+
+The driver runs as a `multiprocessing.Process` inside the same exe — no second exe needed. `freeze_support()` in `main.py` handles the frozen child process routing automatically.
 
 ---
 

@@ -1,7 +1,7 @@
 """
 AULA F108 Pro — RGB Driver App
 Run with: python main.py
-Build exe: pyinstaller aula_driver.spec
+Build exe: pyinstaller --onefile --windowed --add-data "ui;ui" --icon icon.ico --name aula_driver main.py
 """
 
 import sys
@@ -10,23 +10,18 @@ import json
 import threading
 import winreg
 import subprocess as _subprocess
+import multiprocessing
 
-VERSION = 'v1.0.0'
+VERSION = 'v1.0.1'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
-def _get_exe_dir():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
-
 def _get_current_exe():
     if getattr(sys, 'frozen', False):
         return sys.executable
-    return None  # not an exe — skip self-replace when running from source
+    return None
 
 def _check_for_update():
-    """Check GitHub releases for a newer version. Returns dict or None."""
     try:
         import urllib.request
         url = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
@@ -35,10 +30,9 @@ def _check_for_update():
             data = json.loads(r.read())
         latest = data.get('tag_name', '')
         if latest and latest != VERSION:
-            # Find the exe asset
             asset_url = None
             for asset in data.get('assets', []):
-                if asset['name'].endswith('.exe'):
+                if asset['name'] == 'aula_driver.exe':
                     asset_url = asset['browser_download_url']
                     break
             return {'version': latest, 'url': asset_url, 'notes': data.get('body', '')}
@@ -48,7 +42,6 @@ def _check_for_update():
         return None
 
 def _download_and_apply_update(asset_url):
-    """Download new exe, write updater bat, launch it, exit."""
     try:
         import urllib.request
         exe_path = _get_current_exe()
@@ -56,14 +49,12 @@ def _download_and_apply_update(asset_url):
             return {'ok': False, 'message': 'Not running as exe — update manually'}
 
         exe_dir  = os.path.dirname(exe_path)
-        exe_name = os.path.basename(exe_path)
         new_exe  = os.path.join(exe_dir, '_update_new.exe')
         bat_path = os.path.join(exe_dir, '_updater.bat')
 
         print(f'[updater] downloading {asset_url}', flush=True)
         urllib.request.urlretrieve(asset_url, new_exe)
 
-        # Write bat: wait for us to exit, swap files, relaunch, self-delete
         bat = f'''@echo off
 timeout /t 3 /nobreak >nul
 move /y "{new_exe}" "{exe_path}"
@@ -73,77 +64,69 @@ del "%~f0"
         with open(bat_path, 'w') as f:
             f.write(bat)
 
-        # Launch bat detached so it survives our exit
         _subprocess.Popen(
             ['cmd', '/c', bat_path],
             creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS,
             close_fds=True,
         )
-
-        # Stop driver cleanly then exit
         _send_driver_cmd('STOP')
         import time; time.sleep(0.5)
         os._exit(0)
-
     except Exception as e:
         print(f'[updater] update failed: {e}', flush=True)
         return {'ok': False, 'message': str(e)}
 
-# ── Launch driver subprocess BEFORE importing webview ─────────────────────────
-# pywebview/CEF crashes if subprocesses are spawned after it initializes.
-# Start driver here at the very top, before any webview import.
+# ── Driver process ────────────────────────────────────────────────────────────
+# Uses multiprocessing.Process so it works identically from source and as a
+# frozen --onefile exe. freeze_support() at the bottom handles the frozen case.
 _driver_proc = None
 _shm_frame   = None
 _shm_keys    = None
 
 def _launch_driver_early():
     global _driver_proc, _shm_frame, _shm_keys
-    import ctypes
-    driver_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'driver.py')
+    import time as _t
+    import driver as _driver_mod
 
-    # Always spawn driver directly — main.py self-elevates at startup if needed
-    _driver_proc = _subprocess.Popen(
-        [sys.executable, driver_script],
-        stdin=_subprocess.DEVNULL,
-        creationflags=getattr(_subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+    _driver_proc = multiprocessing.Process(
+        target=_driver_mod.main,
+        daemon=True,
+        name='AulaF108Driver',
     )
+    _driver_proc.start()
+    print(f'[ui] Driver process started (pid {_driver_proc.pid})', flush=True)
 
-    import time as _t; _t.sleep(1.2)
-    try:
-        from driver import ShmFrame, ShmKeys
-        _shm_frame = ShmFrame(create=False)
-        _shm_keys  = ShmKeys(create=False)
-        print('[ui] Attached to driver shared memory', flush=True)
-    except Exception as e:
-        print(f'[ui] shm attach failed: {e}', flush=True)
+    for attempt in range(10):
+        _t.sleep(0.8)
+        try:
+            from driver import ShmFrame, ShmKeys
+            _shm_frame = ShmFrame(create=False)
+            _shm_keys  = ShmKeys(create=False)
+            print(f'[ui] Attached to driver shared memory (attempt {attempt+1})', flush=True)
+            return
+        except Exception as e:
+            print(f'[ui] shm attach attempt {attempt+1} failed: {e}', flush=True)
 
-    import time as _t; _t.sleep(1.2)
-    try:
-        from driver import ShmFrame, ShmKeys
-        _shm_frame = ShmFrame(create=False)
-        _shm_keys  = ShmKeys(create=False)
-        print('[ui] Attached to driver shared memory', flush=True)
-    except Exception as e:
-        print(f'[ui] shm attach failed: {e}', flush=True)
+    print('[ui] Could not attach to driver shared memory after 10 attempts', flush=True)
 
 # ── Self-elevate if needed, then launch driver ────────────────────────────────
 if __name__ == '__main__':
+    # freeze_support must be called before anything else in the frozen main process
+    multiprocessing.freeze_support()
+
     try:
         import ctypes as _ctypes
         if not _ctypes.windll.shell32.IsUserAnAdmin():
-            # Relaunch self as admin and exit this non-admin instance immediately
-            # Don't launch the driver yet — the elevated instance will do it
             script = os.path.abspath(__file__)
             params = ' '.join(f'"{a}"' for a in sys.argv[1:])
             ret = _ctypes.windll.shell32.ShellExecuteW(
                 None, 'runas', sys.executable, f'"{script}" {params}', None, 1
             )
             if ret > 32:
-                sys.exit(0)  # elevated copy launched, we're done
+                sys.exit(0)
     except Exception as _e:
         print(f'[ui] elevation check failed: {_e}', flush=True)
 
-    # Only reach here if already admin (or elevation failed)
     try:
         _launch_driver_early()
     except Exception as _e:
@@ -210,7 +193,7 @@ def _send_driver_cmd(cmd: str, payload=None):
 def _stop_driver():
     global _driver_proc
     _send_driver_cmd('STOP')
-    if _driver_proc and hasattr(_driver_proc, 'terminate'):
+    if _driver_proc is not None:
         try: _driver_proc.terminate()
         except: pass
     _driver_proc = None
@@ -222,9 +205,8 @@ class KeyboardAPI:
 
     def connect(self):
         import time as _t
-        # Wait up to 3s for driver to be alive
         for _ in range(15):
-            if _driver_proc is not None and _driver_proc.poll() is None:
+            if _driver_proc is not None and _driver_proc.is_alive():
                 return {'ok': True, 'message': 'Connected — VID:0C45 PID:800A', 'colors': {}}
             _t.sleep(0.2)
         return {'ok': False, 'message': 'Keyboard not found. Is AULA software closed?', 'colors': {}}
@@ -233,7 +215,7 @@ class KeyboardAPI:
         return {'ok': True}
 
     def get_status(self):
-        alive = _driver_proc is not None and _driver_proc.poll() is None
+        alive = _driver_proc is not None and _driver_proc.is_alive()
         return {'connected': alive}
 
     def apply_colors(self, colors):

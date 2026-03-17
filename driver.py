@@ -893,5 +893,9 @@ class Driver:
         print('[driver] Stopped.', flush=True)
 
 
-if __name__ == '__main__':
+def main():
+    """Entry point for multiprocessing.Process — works both from source and frozen exe."""
     Driver().run()
+
+if __name__ == '__main__':
+    main()

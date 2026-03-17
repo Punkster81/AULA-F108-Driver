@@ -26,8 +26,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed `
             --add-data "ui;ui" `
-            --add-data "driver.py;." `
-            --add-data "aula_f108_pro_final.py;." `
+            --icon "icon.ico" `
             --name aula_driver `
             main.py
 
