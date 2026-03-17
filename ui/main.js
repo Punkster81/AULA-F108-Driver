@@ -315,10 +315,11 @@ function _showUpdateBanner(version, url) {
         banner = document.createElement('div');
         banner.id = 'updateBanner';
         banner.style.cssText = `
-            position:fixed;bottom:40px;right:16px;z-index:9999;
-            background:var(--panel);border:1px solid var(--accent);border-radius:8px;
+            position:fixed;bottom:40px;right:16px;z-index:10000;
+            background:#1a1a2e;border:1px solid var(--accent);border-radius:8px;
             padding:12px 16px;display:flex;flex-direction:column;gap:8px;
-            box-shadow:0 4px 20px rgba(0,0,0,0.4);max-width:280px;`;
+            box-shadow:0 4px 24px rgba(0,0,0,0.8);max-width:280px;
+            backdrop-filter:none;`;
         document.body.appendChild(banner);
     }
     banner.innerHTML = `

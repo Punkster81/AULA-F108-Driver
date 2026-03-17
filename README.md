@@ -79,14 +79,19 @@ AULA-F108-Driver/
     └── layers.js                  # Layer system, compositor, animation editor, reactive effects
 ```
 
-User data is stored in folders next to the exe and is never committed to the repo:
+User data is stored in `%LOCALAPPDATA%\AulaF108Driver\` and is never committed to the repo:
 
 ```
-animations/    — saved animation files
-lighting/      — saved flash presets
-layers/        — saved layer stack presets
-reactive/      — saved reactive layer presets
+%LOCALAPPDATA%\AulaF108Driver\
+├── aula_driver.exe    — the installed exe (moved here on first run)
+├── animations/        — saved animation files
+├── lighting/          — saved flash presets
+├── layers/            — saved layer stack presets
+├── reactive/          — saved reactive layer presets
+└── colors/            — recent color history
 ```
+
+When running from source, data folders are created in the project root instead.
 
 ---
 

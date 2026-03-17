@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.1'
+VERSION = 'v1.0.2'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ def _check_for_update():
 def _download_and_apply_update(asset_url):
     try:
         import urllib.request
-        exe_path = _get_current_exe()
+        exe_path = _installed_exe() if _is_frozen() else None
         if not exe_path:
             return {'ok': False, 'message': 'Not running as exe — update manually'}
 
@@ -76,9 +76,106 @@ del "%~f0"
         print(f'[updater] update failed: {e}', flush=True)
         return {'ok': False, 'message': str(e)}
 
+# ── App data directory + install helpers ─────────────────────────────────────
+# These must be defined BEFORE the __main__ block since first-run install
+# runs there before webview is imported.
+
+APP_FOLDER    = 'AulaF108Driver'
+_STARTUP_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_STARTUP_NAME = "AulaF108RGBDriver"
+
+def _is_frozen():
+    return getattr(sys, 'frozen', False)
+
+def _appdata_dir():
+    base = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    d = os.path.join(base, APP_FOLDER)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _installed_exe():
+    return os.path.join(_appdata_dir(), 'aula_driver.exe')
+
+def _is_running_from_install():
+    if not _is_frozen():
+        return True  # source mode — skip install
+    return os.path.normcase(sys.executable) == os.path.normcase(_installed_exe())
+
+def _userdata_base():
+    return _appdata_dir() if _is_frozen() else os.path.dirname(os.path.abspath(__file__))
+
+def _make_dir(name):
+    d = os.path.join(_userdata_base(), name)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _send_driver_cmd(cmd: str, payload=None):
+    try:
+        base = _appdata_dir() if _is_frozen() else os.path.dirname(os.path.abspath(__file__))
+        tmp_file = os.path.join(base, 'driver_cmd.tmp')
+        cmd_file = os.path.join(base, 'driver_cmd.json')
+        data = {'cmd': cmd}
+        if payload is not None:
+            data['payload'] = payload
+        with open(tmp_file, 'w') as f:
+            json.dump(data, f)
+        os.replace(tmp_file, cmd_file)
+    except Exception:
+        pass
+
+def _first_run_install():
+    import shutil, time
+
+    install_path = _installed_exe()
+    install_dir  = _appdata_dir()
+    src          = sys.executable
+    bat_path     = os.path.join(install_dir, '_installer.bat')
+
+    print(f'[install] Installing to {install_path}', flush=True)
+
+    # Desktop shortcut path
+    desktop  = os.path.join(os.path.expanduser('~'), 'Desktop')
+    shortcut = os.path.join(desktop, 'AULA F108 Driver.lnk')
+
+    # PowerShell command to create shortcut (runs after copy in bat)
+    ps_cmd = (
+        f'$ws = New-Object -ComObject WScript.Shell; '
+        f'$s = $ws.CreateShortcut(\\"{shortcut}\\"); '
+        f'$s.TargetPath = \\"{install_path}\\"; '
+        f'$s.IconLocation = \\"{install_path}\\"; '
+        f'$s.Description = \\"AULA F108 Pro RGB Driver\\"; '
+        f'$s.Save()'
+    )
+
+    # Bat: wait for us to exit, copy exe, create shortcut, relaunch
+    bat = f'''@echo off
+timeout /t 3 /nobreak >nul
+copy /y "{src}" "{install_path}"
+powershell -NonInteractive -Command "{ps_cmd}"
+del "{src}"
+start "" "{install_path}"
+del "%~f0"
+'''
+    os.makedirs(install_dir, exist_ok=True)
+    with open(bat_path, 'w') as f:
+        f.write(bat)
+
+    # Register startup pointing to install location
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, _STARTUP_NAME, 0, winreg.REG_SZ, f'"{install_path}"')
+        winreg.CloseKey(key)
+    except Exception as e:
+        print(f'[install] Startup registration failed: {e}', flush=True)
+
+    # Launch bat detached, then exit so the exe is no longer locked
+    _subprocess.Popen(
+        ['cmd', '/c', bat_path],
+        creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS,
+    )
+    return True
+
 # ── Driver process ────────────────────────────────────────────────────────────
-# Uses multiprocessing.Process so it works identically from source and as a
-# frozen --onefile exe. freeze_support() at the bottom handles the frozen case.
 _driver_proc = None
 _shm_frame   = None
 _shm_keys    = None
@@ -127,6 +224,11 @@ if __name__ == '__main__':
     except Exception as _e:
         print(f'[ui] elevation check failed: {_e}', flush=True)
 
+    # First run: install to appdata, create shortcut, relaunch
+    if _is_frozen() and not _is_running_from_install():
+        if _first_run_install():
+            os._exit(0)  # exit immediately so exe lock is released for the bat to copy it
+
     try:
         _launch_driver_early()
     except Exception as _e:
@@ -134,12 +236,10 @@ if __name__ == '__main__':
         import traceback; traceback.print_exc()
 
 import webview
-_STARTUP_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_STARTUP_NAME = "AulaF108RGBDriver"
 
 def _get_exe_path():
-    if getattr(sys, 'frozen', False):
-        return f'"{sys.executable}"'
+    if _is_frozen():
+        return f'"{_installed_exe()}"'
     return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
 
 def set_startup(enable: bool) -> bool:
@@ -173,22 +273,6 @@ def is_startup_enabled() -> bool:
 def resource(rel):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
-
-def _send_driver_cmd(cmd: str, payload=None):
-    """Write a structured JSON command file for the driver to pick up."""
-    try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        tmp_file = os.path.join(base, 'driver_cmd.tmp')
-        cmd_file = os.path.join(base, 'driver_cmd.json')
-        data = {'cmd': cmd}
-        if payload is not None:
-            data['payload'] = payload
-        with open(tmp_file, 'w') as f:
-            json.dump(data, f)
-        os.replace(tmp_file, cmd_file)  # atomic on Windows
-        print(f'[ui] sent cmd={cmd_type}', flush=True)
-    except Exception:
-        pass
 
 def _stop_driver():
     global _driver_proc
@@ -239,46 +323,11 @@ class KeyboardAPI:
         return {'ok': True, 'message': 'Saved — colors will persist after power cycle'}
 
 
-# ── Animation file helpers ────────────────────────────────────────────────────
-def animations_dir():
-    """Returns (and creates if needed) the 'animations' folder next to main.py / the exe."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, 'animations')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-def lighting_dir():
-    """Returns (and creates if needed) the 'lighting' folder next to main.py / the exe."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, 'lighting')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-def colors_dir():
-    """Returns (and creates if needed) the 'colors' folder next to main.py / the exe."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, 'colors')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-def layers_dir():
-    """Returns (and creates if needed) the 'layers' folder next to main.py / the exe."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, 'layers')
-    os.makedirs(d, exist_ok=True)
-    return d
+def animations_dir(): return _make_dir('animations')
+def lighting_dir():   return _make_dir('lighting')
+def colors_dir():     return _make_dir('colors')
+def layers_dir():     return _make_dir('layers')
+def reactive_dir():   return _make_dir('reactive')
 
 class AnimationAPI:
     def save_current_animation(self, data):
@@ -508,6 +557,46 @@ class AnimationAPI:
         """Delete a layer preset file."""
         try:
             path = os.path.join(layers_dir(), os.path.basename(filename))
+            if os.path.exists(path):
+                os.remove(path)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    # ── Reactive presets ───────────────────────────────────────────────────────
+    def save_reactive_preset(self, name, data):
+        try:
+            safe = ''.join(c if c.isalnum() or c in '-_ ' else '_' for c in name).strip() or 'reactive'
+            fname = safe.replace(' ', '_').lower() + '.json'
+            data['name'] = name
+            path = os.path.join(reactive_dir(), fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            return {'ok': True, 'path': path, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def list_reactive_presets(self):
+        try:
+            results = []
+            d = reactive_dir()
+            for fname in sorted(os.listdir(d)):
+                if not fname.lower().endswith('.json'):
+                    continue
+                try:
+                    with open(os.path.join(d, fname), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    data['_filename'] = fname
+                    results.append(data)
+                except Exception:
+                    pass
+            return {'ok': True, 'presets': results}
+        except Exception as e:
+            return {'ok': False, 'presets': [], 'message': str(e)}
+
+    def delete_reactive_preset(self, filename):
+        try:
+            path = os.path.join(reactive_dir(), os.path.basename(filename))
             if os.path.exists(path):
                 os.remove(path)
             return {'ok': True}

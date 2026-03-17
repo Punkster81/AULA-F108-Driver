@@ -665,7 +665,7 @@
     #toast {
         position: fixed;
         bottom: 60px;
-        right: 24px;
+        left: 24px;
         background: var(--accent);
         color: #fff;
         font-size: 0.72rem;

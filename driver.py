@@ -850,8 +850,15 @@ class Driver:
 
         print('[driver] Running.', flush=True)
 
-        # Poll for commands via file
-        cmd_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'driver_cmd.json')
+        # Poll for commands via file — use appdata dir when frozen, project root from source
+        if getattr(sys, 'frozen', False):
+            _base = os.path.join(
+                os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+                'AulaF108Driver'
+            )
+        else:
+            _base = os.path.dirname(os.path.abspath(__file__))
+        cmd_file = os.path.join(_base, 'driver_cmd.json')
         try: os.remove(cmd_file)
         except: pass
 
