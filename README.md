@@ -230,7 +230,7 @@ Full protocol details are documented in `aula_f108_pro_final.py`.
 PRs welcome. Key areas that would benefit from contributions:
 
 - New reactive effects (see adding a new reactive effect above)
-- Capture and reverse-engineer built-in firmware effect commands (breathing, wave, spectrum) from official AULA software
+- Confirm bluetooth or wifi support
 - macOS / Linux HID support investigation
 
 ## License
