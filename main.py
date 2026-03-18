@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.3'
+VERSION = 'v1.0.4'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -56,10 +56,14 @@ def _download_and_apply_update(asset_url):
         urllib.request.urlretrieve(asset_url, new_exe)
 
         bat = f'''@echo off
-timeout /t 3 /nobreak >nul
+timeout /t 4 /nobreak >nul
 move /y "{new_exe}" "{exe_path}"
-start "" "{exe_path}"
-del "%~f0"
+if errorlevel 1 (
+    timeout /t 3 /nobreak >nul
+    move /y "{new_exe}" "{exe_path}"
+)
+powershell -WindowStyle Hidden -Command "Start-Process '{exe_path}' -Verb RunAs"
+(goto) 2>nul & del "%~f0"
 '''
         with open(bat_path, 'w') as f:
             f.write(bat)
@@ -683,9 +687,3 @@ if __name__ == '__main__':
         main()
     except SystemExit:
         pass
-    except Exception as e:
-        traceback.print_exc()
-        input('Press Enter to exit...')
-    except BaseException as e:
-        traceback.print_exc()
-        input('Press Enter to exit...')
