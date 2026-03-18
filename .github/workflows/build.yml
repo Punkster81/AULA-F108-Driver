@@ -30,9 +30,14 @@ jobs:
             --name aula_driver `
             main.py
 
+      - name: Get commit message
+        id: commit
+        run: echo "msg=$(git log -1 --pretty=%s)" >> $env:GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }} - ${{ steps.commit.outputs.msg }}
           files: dist/aula_driver.exe
           generate_release_notes: true
         env:
