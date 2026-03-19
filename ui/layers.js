@@ -300,10 +300,15 @@ const Effects = {
         defaults: { rippleSpeed:8.0, rippleWidth:1.2, fadeDuration:1500, rippleHoldMode:'once' },
         initRippleState: ()=>([]),
         onPress(state, idx, c, now, layer) {
-            if ((layer.rippleHoldMode||'once')!=='continuous' && state.some(r=>r.origin===idx&&r.releaseTime===null)) return;
-            state.push({ origin:idx, color:c, pressTime:now, releaseTime:null });
+            const holdMode = layer.rippleHoldMode || 'once';
+            if (holdMode !== 'continuous' && state.some(r=>r.origin===idx&&r.releaseTime===null)) return;
+            // In once mode: set releaseTime=now so it fades for full fadeDuration from press
+            // In continuous mode: fades from release as normal
+            state.push({ origin:idx, color:c, pressTime:now,
+                releaseTime: holdMode === 'once' ? now : null });
         },
-        onRelease(state, idx, now) {
+        onRelease(state, idx, now, layer) {
+            if ((layer.rippleHoldMode||'once') === 'once') return; // once mode ignores release
             for (let i=state.length-1;i>=0;i--) { if(state[i].origin===idx&&state[i].releaseTime===null){state[i].releaseTime=now;break;} }
         },
         snapshot(layer, now) {
