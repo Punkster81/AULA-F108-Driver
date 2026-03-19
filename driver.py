@@ -487,10 +487,12 @@ class Driver:
                 if not isinstance(cfg, dict): continue
                 effect = cfg.get('effect', 'highlight')
                 if i < len(self._reactive_layers) and self._reactive_layers[i]['cfg'].get('effect') == effect:
-                    existing = self._reactive_layers[i]['active']
+                    existing      = self._reactive_layers[i]['active']
+                    existing_held = self._reactive_layers[i].get('held_keys', set())
                 else:
-                    existing = [] if effect in ('ripple', 'meteor', 'lightning') else {}
-                new_layers.append({'cfg': cfg, 'active': existing})
+                    existing      = [] if effect in ('ripple', 'meteor', 'lightning') else {}
+                    existing_held = set()
+                new_layers.append({'cfg': cfg, 'active': existing, 'held_keys': existing_held})
             self._reactive_layers = new_layers
 
     def _build_reactive_frame(self):
@@ -675,23 +677,25 @@ class Driver:
                 return
             now = time.monotonic()
             for layer_state in self._reactive_layers:
-                cfg    = layer_state['cfg']
-                active = layer_state['active']
-                effect = cfg.get('effect', 'highlight')
-                per_key = cfg.get('colors', {})
-                c = per_key.get(led)
+                cfg       = layer_state['cfg']
+                active    = layer_state['active']
+                held_keys = layer_state['held_keys']
+                effect    = cfg.get('effect', 'highlight')
+                per_key   = cfg.get('colors', {})
+                c         = per_key.get(led)
                 if c is None:
-                    # No color painted on this key — skip for all reactive effects
-                    if effect in ('ripple', 'meteor', 'lightning'):
-                        if kind == 'release':
+                    # No color painted on this key — handle releases only
+                    if kind == 'release':
+                        held_keys.discard(led)
+                        if effect in ('ripple', 'meteor', 'lightning'):
                             for entry in reversed(active):
                                 key_field = 'origin' if effect == 'ripple' else 'target'
-                                if entry[key_field] == led and entry['release_ts'] is None:
+                                if entry.get(key_field) == led and entry.get('release_ts') is None:
                                     entry['release_ts'] = now
                                     break
-                    elif effect == 'highlight':
-                        if kind == 'release' and led in active:
-                            active[led]['release_ts'] = now
+                        elif effect == 'highlight':
+                            if led in active:
+                                active[led]['release_ts'] = now
                     continue
                 if isinstance(c, (list, tuple)):
                     r, g, b = int(c[0]), int(c[1]), int(c[2])
@@ -719,27 +723,30 @@ class Driver:
                     if kind == 'press':
                         hold_mode = cfg.get('rippleHoldMode', 'once')
                         if hold_mode == 'once':
-                            already_held = any(
-                                m['target'] == led and not (now - m['press_ts'] >= cfg.get('fallDuration',300)/1000.0 + cfg.get('sitDuration',200)/1000.0)
-                                for m in active
-                            )
-                            if already_held:
+                            if led in held_keys:
                                 continue
-                        path = LED_METEOR_PATHS.get(led, [])
-                        start_offset = random.randint(0, min(2, max(0, len(path)-2))) if len(path) > 2 else 0
-                        drift = random.randint(-1, 1)
+                        held_keys.add(led)
+                        drift  = random.randint(-1, 1)
                         drifted = _get_drifted_path(led, drift)
                         active.append({'target': led, 'r':r,'g':g,'b':b,
                                        'press_ts': now, 'release_ts': None,
-                                       'start_offset': 0, 'path': drifted or path})
-                    # meteor doesn't use release_ts for anything yet
+                                       'start_offset': 0, 'path': drifted or LED_METEOR_PATHS.get(led, [])})
+                    elif kind == 'release':
+                        held_keys.discard(led)
                 elif effect == 'lightning':
                     if kind == 'press':
-                        drift = random.randint(-1, 1)
+                        hold_mode = cfg.get('lightningHoldMode', 'once')
+                        if hold_mode == 'once':
+                            if led in held_keys:
+                                continue
+                        held_keys.add(led)
+                        drift   = random.randint(-1, 1)
                         drifted = _get_drifted_path(led, drift)
-                        path = drifted if drifted else LED_METEOR_PATHS.get(led, [])
                         active.append({'target': led, 'r':r,'g':g,'b':b,
-                                       'press_ts': now, 'path': path})
+                                       'press_ts': now,
+                                       'path': drifted if drifted else LED_METEOR_PATHS.get(led, [])})
+                    elif kind == 'release':
+                        held_keys.discard(led)
                 else:
                     # active is a dict — one entry per key
                     if kind == 'press':
