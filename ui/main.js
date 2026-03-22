@@ -456,8 +456,8 @@ async function connectKeyboard() {
         toast('Connected!'); startStaticStream(); await restoreLastLighting();
         _checkForUpdate();
         window.pywebview.api.get_version().then(r=>{ if(r.ok){const el=document.getElementById('appVersion');if(el)el.textContent=r.version;} });
-        // Start soundboard — loads cards, syncs to driver, starts trigger poller
-        if (typeof initSoundboard==='function') initSoundboard();
+        // Start soundboard — loads cards, starts poller, syncs to driver
+        if (typeof initSoundboard==='function') await initSoundboard();
     } else {
         status.textContent=r.message; dot.style.background='#ff4444'; dot.style.boxShadow='0 0 8px #ff4444';
         toast(r.message);
@@ -566,7 +566,7 @@ function switchTopMode(mode) {
     if (danger) danger.style.display = isSb ? 'none' : '';
 
     if (isSb && typeof clearSelection==='function') clearSelection();
-    if (isSb && typeof initSoundboard==='function') initSoundboard();
+    if (isSb && typeof initSoundboardUI==='function') initSoundboardUI();
     if (isSb && typeof _sbShowAllComboDim==='function') setTimeout(_sbShowAllComboDim, 80);
     _syncTopModeBtns(mode);
 }

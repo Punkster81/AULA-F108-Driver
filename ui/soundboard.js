@@ -115,6 +115,29 @@ function sbCardLeave() {
     _sbShowAllComboDim();
 }
 
+// code → VK map for reliable recording (e.keyCode unreliable for numpad with NumLock off)
+const SB_CODE_TO_VK = {
+    'Escape':27,'F1':112,'F2':113,'F3':114,'F4':115,'F5':116,'F6':117,'F7':118,'F8':119,
+    'F9':120,'F10':121,'F11':122,'F12':123,'PrintScreen':44,'ScrollLock':145,'Pause':19,
+    'Backquote':192,'Digit1':49,'Digit2':50,'Digit3':51,'Digit4':52,'Digit5':53,
+    'Digit6':54,'Digit7':55,'Digit8':56,'Digit9':57,'Digit0':48,'Minus':189,'Equal':187,
+    'Backspace':8,'Tab':9,'Insert':45,'Home':36,'PageUp':33,'Delete':46,'End':35,'PageDown':34,
+    'NumLock':144,'NumpadDivide':111,'NumpadMultiply':106,'NumpadSubtract':109,
+    'Numpad7':103,'Numpad8':104,'Numpad9':105,'NumpadAdd':107,
+    'Numpad4':100,'Numpad5':101,'Numpad6':102,
+    'Numpad1':97,'Numpad2':98,'Numpad3':99,'NumpadEnter':13,
+    'Numpad0':96,'NumpadDecimal':110,
+    'KeyQ':81,'KeyW':87,'KeyE':69,'KeyR':82,'KeyT':84,'KeyY':89,'KeyU':85,'KeyI':73,
+    'KeyO':79,'KeyP':80,'BracketLeft':219,'BracketRight':221,'Backslash':220,
+    'CapsLock':20,'KeyA':65,'KeyS':83,'KeyD':68,'KeyF':70,'KeyG':71,'KeyH':72,
+    'KeyJ':74,'KeyK':75,'KeyL':76,'Semicolon':186,'Quote':222,'Enter':13,
+    'ShiftLeft':160,'KeyZ':90,'KeyX':88,'KeyC':67,'KeyV':86,'KeyB':66,'KeyN':78,
+    'KeyM':77,'Comma':188,'Period':190,'Slash':191,'ShiftRight':161,
+    'ControlLeft':162,'MetaLeft':91,'AltLeft':164,'Space':32,
+    'AltRight':165,'ContextMenu':93,'ControlRight':163,
+    'ArrowLeft':37,'ArrowDown':40,'ArrowUp':38,'ArrowRight':39,
+};
+
 // VK code → display name map for showing combos
 const VK_NAMES = {
     8:'Backspace',9:'Tab',13:'Enter',16:'Shift',17:'Ctrl',18:'Alt',19:'Pause',
@@ -160,18 +183,30 @@ function _comboLabel(combo) {
     return combo.map(_vkName).join(' + ') || '—';
 }
 
+let _sbUiLoaded = false;
+
 // ── Init ──────────────────────────────────────────────────────────────────────
+// Core init — called on connect, starts poller and syncs driver immediately
 async function initSoundboard() {
     if (_sbLoaded) return;
     _sbLoaded = true;
     await loadSoundboardCards();
     _startSbPoller();
+    if (hasPyAPI()) {
+        // Wait for driver cmd loop to be ready (it polls every 100ms)
+        await new Promise(r => setTimeout(r, 500));
+        try { await window.pywebview.api.sync_soundboard_to_driver(); } catch(e) {
+            console.error('[soundboard] sync failed:', e);
+        }
+    }
+}
+
+// UI init — called when soundboard tab is first opened
+async function initSoundboardUI() {
+    if (_sbUiLoaded) return;
+    _sbUiLoaded = true;
     await _checkVbAudio();
     await _populateAudioDevices();
-    if (hasPyAPI()) {
-        try { await window.pywebview.api.sync_soundboard_to_driver(); } catch(e) {}
-    }
-    // Show dim highlights for all assigned keys
     setTimeout(_sbShowAllComboDim, 100);
 }
 
@@ -421,6 +456,9 @@ function startRecording(id) {
     _sbRecordHeld = new Set();
     _sbRecordCombo = [];
 
+    // Tell driver to pause soundboard matching while we record
+    if (hasPyAPI()) try { window.pywebview.api.set_soundboard_recording(true); } catch(e) {}
+
     const btn = document.getElementById(`sbRec_${id}`);
     if (btn) { btn.textContent = '⏹ Stop (release all)'; btn.classList.add('recording'); }
 
@@ -434,7 +472,8 @@ function startRecording(id) {
 function _sbKeyDown(e) {
     e.preventDefault();
     if (!_sbRecording) return;
-    const entry = { code: e.code, vk: e.keyCode };
+    const vk = SB_CODE_TO_VK[e.code] ?? e.keyCode;
+    const entry = { code: e.code, vk };
     // Dedupe by code
     if (![..._sbRecordHeld].some(k => k.code === e.code)) {
         _sbRecordHeld.add(entry);
@@ -468,7 +507,11 @@ async function stopRecording() {
     const btn = document.getElementById(`sbRec_${id}`);
     if (btn) { btn.textContent = '⏺ Record Key'; btn.classList.remove('recording'); }
 
-    if (!combo.length) return;
+    if (!combo.length) {
+        // No combo recorded — still need to re-enable driver triggers
+        if (hasPyAPI()) try { window.pywebview.api.set_soundboard_recording(false); } catch(e) {}
+        return;
+    }
 
     const card = _sbCards.find(c => c.id === id);
     if (!card) return;

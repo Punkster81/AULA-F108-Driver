@@ -1,2 +1,2 @@
 hidapi
-pywebview[qt]
+pywebview>=4.0

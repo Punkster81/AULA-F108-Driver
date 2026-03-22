@@ -424,6 +424,7 @@ class Driver:
         self._send_queue  = queue.Queue(maxsize=8)
         self._soundboard_cards = []   # list of {id, combo:[vk,...], name}
         self._soundboard_lock  = threading.Lock()
+        self._soundboard_recording = False  # pauses trigger matching during recording
         self._held_vks    = set()     # currently held raw VK codes
         self._sb_triggered = set()    # combos triggered this hold cycle (prevent repeats)
     # ── Keyboard connection ───────────────────────────────────────────────────
@@ -513,6 +514,13 @@ class Driver:
         """Update soundboard card list from UI. cards: [{id, combo:[vk,...], name}]"""
         with self._soundboard_lock:
             self._soundboard_cards = cards or []
+            self._soundboard_recording = False  # always re-enable after card sync
+        print(f'[driver] soundboard cards updated: {len(self._soundboard_cards)} cards, combos={[c.get("combo") for c in self._soundboard_cards]}', flush=True)
+
+    def set_soundboard_recording(self, recording):
+        """Pause soundboard trigger matching while user is recording a combo."""
+        with self._soundboard_lock:
+            self._soundboard_recording = bool(recording)
 
     def _check_soundboard_trigger(self, vk, kind):
         """Called on every keypress — checks if held VKs match any soundboard combo."""
@@ -520,7 +528,6 @@ class Driver:
             self._held_vks.add(vk)
         elif kind == 'release':
             self._held_vks.discard(vk)
-            # Clear triggered set so combos can fire again next time
             self._sb_triggered = {t for t in self._sb_triggered if not any(
                 v not in self._held_vks for v in t
             )}
@@ -529,6 +536,8 @@ class Driver:
             return
 
         with self._soundboard_lock:
+            if self._soundboard_recording:
+                return
             cards = list(self._soundboard_cards)
 
         for card in cards:
@@ -536,7 +545,6 @@ class Driver:
             if not combo:
                 continue
             combo_key = frozenset(combo)
-            # Exact match — held keys must equal the combo exactly
             if self._held_vks == combo and combo_key not in self._sb_triggered:
                 self._sb_triggered.add(combo_key)
                 self._write_soundboard_trigger(card['id'])
@@ -883,8 +891,26 @@ class Driver:
                         self._on_key_event(led, 'press')
                     elif wParam in (WM_KEYUP, WM_SYSKEYUP):
                         self._on_key_event(led, 'release')
-                # Soundboard uses raw VK codes for combo matching
+                # Soundboard uses resolved VK codes (extended flag disambiguates numpad vs nav cluster)
                 vk = kb.vkCode
+                extended = bool(kb.flags & LLKHF_EXTENDED)
+                # With NumLock off, numpad keys report nav cluster VKs — remap back to numpad VKs
+                # Non-extended = real numpad key; extended = nav cluster key
+                NUMPAD_VK_REMAP = {
+                    45: 96,  # Insert -> Numpad0
+                    35: 97,  # End    -> Numpad1
+                    40: 98,  # Down   -> Numpad2
+                    34: 99,  # PgDn   -> Numpad3
+                    37: 100, # Left   -> Numpad4
+                    12: 101, # Clear  -> Numpad5
+                    39: 102, # Right  -> Numpad6
+                    36: 103, # Home   -> Numpad7
+                    38: 104, # Up     -> Numpad8
+                    33: 105, # PgUp   -> Numpad9
+                    46: 110, # Delete -> NumpadDecimal
+                }
+                if not extended and vk in NUMPAD_VK_REMAP:
+                    vk = NUMPAD_VK_REMAP[vk]
                 if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
                     self._check_soundboard_trigger(vk, 'press')
                 elif wParam in (WM_KEYUP, WM_SYSKEYUP):
@@ -968,6 +994,8 @@ class Driver:
                         self.set_reactive_config(payload.get('layers'), payload.get('enabled', False))
                     elif cmd == 'SOUNDBOARD_CFG':
                         self.set_soundboard_cards(payload.get('cards', []))
+                    elif cmd == 'SOUNDBOARD_RECORDING':
+                        self.set_soundboard_recording(payload.get('recording', False))
                     elif cmd == 'SAVE_FLASH':
                         self._send_frame(payload)
                         with self._kb_lock:

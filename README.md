@@ -22,10 +22,13 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
   - Ripple — expanding ring from keypress
   - Meteor — light falls from top row down to the pressed key with trail
   - Lightning — entire column flashes instantly on press
+- **Soundboard** — bind global key combos to sound files, plays through speakers and/or a virtual audio cable for VC routing
+  - VB-Audio Virtual Cable integration — route sounds into Discord/game voice chat
+  - Per-card volume, renaming, keyboard visualisation of assigned keys
 - Save/load layer presets, animations, flash presets, and reactive presets as JSON
 - Auto-updater — notified of new releases on startup, one-click update and restart
 - Launch on Windows startup (optional)
-- Native desktop app via PyWebView — no browser needed
+- Native desktop app via PyWebView 4+ — no browser needed, persistent settings storage
 
 ## Hardware
 
@@ -40,7 +43,7 @@ Built by reverse-engineering the USB HID protocol via Wireshark captures.
 
 ## Running from source
 
-**Requirements:** Python 3.8+, Windows
+**Requirements:** Python 3.8+, Windows, PyWebView 4+
 
 ```bash
 git clone https://github.com/Punkster81/AULA-F108-Driver
@@ -76,19 +79,24 @@ AULA-F108-Driver/
     ├── layout.js                  # Keyboard layout data (ROWS, NAV, NUMPAD)
     ├── main.js                    # Color picker, keyboard DOM, selection, PyWebView bridge
     ├── flash.js                   # Flash-to-memory tab
-    └── layers.js                  # Layer system, compositor, animation editor, reactive effects
+    ├── layers.js                  # Layer system, compositor, animation editor, reactive effects
+    └── soundboard.js              # Soundboard tab — key combos, audio playback, VB-Audio
 ```
 
 User data is stored in `%LOCALAPPDATA%\AulaF108Driver\` and is never committed to the repo:
 
 ```
 %LOCALAPPDATA%\AulaF108Driver\
-├── aula_driver.exe    — the installed exe (moved here on first run)
-├── animations/        — saved animation files
-├── lighting/          — saved flash presets
-├── layers/            — saved layer stack presets
-├── reactive/          — saved reactive layer presets
-└── colors/            — recent color history
+├── aula_driver.exe       — the installed exe (moved here on first run)
+├── webview_storage/      — PyWebView persistent storage (mic permissions, etc.)
+├── animations/           — saved animation files
+├── lighting/             — saved flash presets
+├── layers/               — saved layer stack presets
+├── reactive/             — saved reactive layer presets
+├── colors/               — recent color history
+└── soundboard/
+    ├── cards.json        — soundboard card definitions
+    └── sounds/           — copied sound files
 ```
 
 When running from source, data folders are created in the project root instead.
@@ -108,18 +116,22 @@ Streams a live composite frame to the keyboard at ~30fps. Layers are stacked bot
 ## Architecture
 
 ```
-main.py  (UI process — PyWebView)
+main.py  (UI process — PyWebView 4+)
   └─ spawns driver.py  (background process — HID + Win32 keyboard hook)
 
 Shared memory:
   AulaF108Frame  — UI writes compositor frames → driver sends to hardware
   AulaF108Keys   — driver writes key events   → UI reads for reactive effects
 
+driver_cmd.json  — UI writes commands → driver reads (SOUNDBOARD_CFG, SOUNDBOARD_RECORDING, etc.)
+soundboard_trigger.json — driver writes trigger → UI polls at 50ms
+
 JS load order:
-  layout.js   → keyboard geometry constants
-  main.js     → color picker, keyboard DOM, selection, bridge, updater UI
-  flash.js    → flash-to-memory tab
-  layers.js   → layers, compositor, animation editor, all reactive effects
+  layout.js      → keyboard geometry constants
+  main.js        → color picker, keyboard DOM, selection, bridge, updater UI
+  flash.js       → flash-to-memory tab
+  layers.js      → layers, compositor, animation editor, all reactive effects
+  soundboard.js  → soundboard cards, key recording, audio playback, VB-Audio
 ```
 
 ---

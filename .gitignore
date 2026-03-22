@@ -39,6 +39,7 @@ soundboard/
 layers/
 reactive/
 driver_cmd.json
+soundboard_cards.json
 
 # Updater temp files
 _update_new.exe

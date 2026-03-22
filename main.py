@@ -922,9 +922,20 @@ class SoundboardAPI:
             return {'ok': True}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
+
+    def sync_soundboard_to_driver(self):
+        """Send all soundboard cards to the driver process."""
         try:
             cards = self._load_cards()
             self._sync_driver(cards)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def set_soundboard_recording(self, recording):
+        """Tell driver to pause trigger matching while recording a combo."""
+        try:
+            _send_driver_cmd('SOUNDBOARD_RECORDING', {'recording': bool(recording)})
             return {'ok': True}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
@@ -959,7 +970,7 @@ def main():
         threading.Thread(target=_stop_driver, daemon=True).start()
     window.events.closed += on_close
 
-    webview.start(debug=False)
+    webview.start(debug=False, private_mode=False, storage_path=os.path.join(_appdata_dir(), 'webview_storage'))
 
 
 if __name__ == '__main__':
