@@ -338,6 +338,16 @@ for _idx, (_x, _y) in LED_COORDS.items():
 for _r in _LED_ROWS:
     _LED_ROWS[_r].sort()
 
+def _random_rainbow_rgb():
+    """Return a random vivid hue as (r, g, b) integers."""
+    h = random.random()
+    i = int(h * 6)
+    f = h * 6 - i
+    q = 1 - f
+    cases = [(1,f,0),(q,1,0),(0,1,f),(0,q,1),(f,0,1),(1,0,q)]
+    r, g, b = cases[i % 6]
+    return int(r*255), int(g*255), int(b*255)
+
 def _get_drifted_path(target_led, drift=0):
     """Build a meteor path that starts from a neighbor in the top row (drift=±1)."""
     if target_led not in LED_COORDS:
@@ -407,11 +417,15 @@ class Driver:
         self._shm_frame   = None
         self._shm_keys    = None
         self._running     = False
-        self._reactive_layers  = []     # list of {cfg, active} per layer
+        self._reactive_layers  = []
         self._reactive_enabled = False
         self._reactive_lock = threading.Lock()
-        self._base_frame  = {}       # last frame from shm (non-reactive)
+        self._base_frame  = {}
         self._send_queue  = queue.Queue(maxsize=8)
+        self._soundboard_cards = []   # list of {id, combo:[vk,...], name}
+        self._soundboard_lock  = threading.Lock()
+        self._held_vks    = set()     # currently held raw VK codes
+        self._sb_triggered = set()    # combos triggered this hold cycle (prevent repeats)
     # ── Keyboard connection ───────────────────────────────────────────────────
     def connect(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -494,6 +508,57 @@ class Driver:
                     existing_held = set()
                 new_layers.append({'cfg': cfg, 'active': existing, 'held_keys': existing_held})
             self._reactive_layers = new_layers
+
+    def set_soundboard_cards(self, cards):
+        """Update soundboard card list from UI. cards: [{id, combo:[vk,...], name}]"""
+        with self._soundboard_lock:
+            self._soundboard_cards = cards or []
+
+    def _check_soundboard_trigger(self, vk, kind):
+        """Called on every keypress — checks if held VKs match any soundboard combo."""
+        if kind == 'press':
+            self._held_vks.add(vk)
+        elif kind == 'release':
+            self._held_vks.discard(vk)
+            # Clear triggered set so combos can fire again next time
+            self._sb_triggered = {t for t in self._sb_triggered if not any(
+                v not in self._held_vks for v in t
+            )}
+
+        if kind != 'press':
+            return
+
+        with self._soundboard_lock:
+            cards = list(self._soundboard_cards)
+
+        for card in cards:
+            combo = set(card.get('combo', []))
+            if not combo:
+                continue
+            combo_key = frozenset(combo)
+            # Exact match — held keys must equal the combo exactly
+            if self._held_vks == combo and combo_key not in self._sb_triggered:
+                self._sb_triggered.add(combo_key)
+                self._write_soundboard_trigger(card['id'])
+                break
+
+    def _write_soundboard_trigger(self, card_id):
+        """Write trigger file for the UI to poll."""
+        try:
+            if getattr(sys, 'frozen', False):
+                base = os.path.join(
+                    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+                    'AulaF108Driver'
+                )
+            else:
+                base = os.path.dirname(os.path.abspath(__file__))
+            path = os.path.join(base, 'soundboard_trigger.json')
+            tmp  = path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump({'id': card_id, 'ts': time.time()}, f)
+            os.replace(tmp, path)
+        except Exception as e:
+            print(f'[driver] soundboard trigger write failed: {e}', flush=True)
 
     def _build_reactive_frame(self):
         with self._reactive_lock:
@@ -702,23 +767,29 @@ class Driver:
                 else:
                     r, g, b = int(c.get('r',255)), int(c.get('g',255)), int(c.get('b',255))
 
+                if kind == 'press' and cfg.get('rainbow', False):
+                    r, g, b = _random_rainbow_rgb()
+
                 if effect == 'ripple':
                     if kind == 'press':
                         hold_mode = cfg.get('rippleHoldMode', 'once')
                         if hold_mode == 'once':
-                            already_held = any(
-                                rip['origin'] == led and rip['release_ts'] is None
-                                for rip in active
-                            )
-                            if already_held:
+                            if led in held_keys:
                                 continue
-                        active.append({'origin': led, 'r':r,'g':g,'b':b,
-                                       'press_ts': now, 'release_ts': None})
+                            held_keys.add(led)
+                            active.append({'origin': led, 'r':r,'g':g,'b':b,
+                                           'press_ts': now, 'release_ts': now})
+                        else:
+                            active.append({'origin': led, 'r':r,'g':g,'b':b,
+                                           'press_ts': now, 'release_ts': None})
                     elif kind == 'release':
-                        for ripple in reversed(active):
-                            if ripple['origin'] == led and ripple['release_ts'] is None:
-                                ripple['release_ts'] = now
-                                break
+                        held_keys.discard(led)
+                        hold_mode = cfg.get('rippleHoldMode', 'once')
+                        if hold_mode != 'once':
+                            for ripple in reversed(active):
+                                if ripple['origin'] == led and ripple['release_ts'] is None:
+                                    ripple['release_ts'] = now
+                                    break
                 elif effect == 'meteor':
                     if kind == 'press':
                         hold_mode = cfg.get('rippleHoldMode', 'once')
@@ -812,6 +883,12 @@ class Driver:
                         self._on_key_event(led, 'press')
                     elif wParam in (WM_KEYUP, WM_SYSKEYUP):
                         self._on_key_event(led, 'release')
+                # Soundboard uses raw VK codes for combo matching
+                vk = kb.vkCode
+                if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                    self._check_soundboard_trigger(vk, 'press')
+                elif wParam in (WM_KEYUP, WM_SYSKEYUP):
+                    self._check_soundboard_trigger(vk, 'release')
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         _proc = HOOKPROC(_hook_proc)
@@ -889,6 +966,8 @@ class Driver:
                     elif cmd == 'REACTIVE_CFG':
                         print(f'[driver] got REACTIVE_CFG payload={payload}', flush=True)
                         self.set_reactive_config(payload.get('layers'), payload.get('enabled', False))
+                    elif cmd == 'SOUNDBOARD_CFG':
+                        self.set_soundboard_cards(payload.get('cards', []))
                     elif cmd == 'SAVE_FLASH':
                         self._send_frame(payload)
                         with self._kb_lock:

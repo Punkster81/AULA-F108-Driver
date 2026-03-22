@@ -44,13 +44,13 @@ function _setReactiveParam(key, val, labelId, labelSuffix='') {
     const layer = getActiveLayer();
     if (!layer || layer.type !== 'reactive') return;
     layer[key] = val;
-    // Clear reactive state when hold mode changes so stale fade entries don't carry over
     if (key === 'holdMode') { layer._reactiveColors = {}; layer._heldKeys = new Set(); }
     const el = document.getElementById(labelId);
     if (el) el.textContent = val + labelSuffix;
     _reactiveSynced = false;
     _syncReactiveConfig();
 }
+function setReactiveParam(key, val) { _setReactiveParam(key, val); }
 
 // ── LED coordinate map ────────────────────────────────────────────────────────
 const LED_COORDS = {
@@ -181,6 +181,21 @@ function _getDriftedMeteorPath(targetLed, drift) {
 
 // ── Shared settings UI helpers ────────────────────────────────────────────────
 function _colorPickerHTML() { return ''; }
+
+function _randomRainbowRGB() {
+    const h = Math.random();
+    const i = Math.floor(h*6), f = h*6-i, p=0, q=1-f, t=f;
+    const cases=[[1,t,0],[q,1,0],[0,1,t],[0,q,1],[t,0,1],[1,0,q]];
+    const [r,g,b]=cases[i%6];
+    return {r:Math.round(r*255),g:Math.round(g*255),b:Math.round(b*255)};
+}
+
+function _rainbowCheckboxHTML(layer) {
+    const checked = layer.rainbow ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:5px;font-size:0.62rem;color:var(--dim);cursor:pointer;margin-left:4px">
+        <input type="checkbox" ${checked} onchange="setReactiveParam('rainbow',this.checked)"> 🌈 Rainbow color
+    </label>`;
+}
 function _holdModeHTML(layer, paramKey, options) {
     return `<div style="display:flex;gap:5px;align-items:center">
         <span class="rs-label">While held:</span>
@@ -290,7 +305,9 @@ const Effects = {
             const fade = hold === 'fade';
             return _holdModeHTML(layer,'holdMode',[['fade','FADE OUT'],['instant','INSTANT OFF'],['toggle-on','TOGGLE (off→on)'],['toggle-off','TOGGLE (on→off)']])
                 + (fade ? _sliderHTML(layer,'fadeDuration','Fade',50,3000,50,500,'rsFadeVal') : '')
-                + _colorPickerHTML(layer);
+                + _colorPickerHTML(layer)
+                + _rainbowCheckboxHTML(layer);
+
         },
         serializeExtra: ()=>({}),
     },
@@ -301,14 +318,17 @@ const Effects = {
         initRippleState: ()=>([]),
         onPress(state, idx, c, now, layer) {
             const holdMode = layer.rippleHoldMode || 'once';
-            if (holdMode !== 'continuous' && state.some(r=>r.origin===idx&&r.releaseTime===null)) return;
-            // In once mode: set releaseTime=now so it fades for full fadeDuration from press
-            // In continuous mode: fades from release as normal
+            if (holdMode !== 'continuous') {
+                if (!layer._heldKeys) layer._heldKeys = new Set();
+                if (layer._heldKeys.has(idx)) return;
+                layer._heldKeys.add(idx);
+            }
             state.push({ origin:idx, color:c, pressTime:now,
                 releaseTime: holdMode === 'once' ? now : null });
         },
         onRelease(state, idx, now, layer) {
-            if ((layer.rippleHoldMode||'once') === 'once') return; // once mode ignores release
+            layer._heldKeys?.delete(idx);
+            if ((layer.rippleHoldMode||'once') === 'once') return;
             for (let i=state.length-1;i>=0;i--) { if(state[i].origin===idx&&state[i].releaseTime===null){state[i].releaseTime=now;break;} }
         },
         snapshot(layer, now) {
@@ -338,7 +358,9 @@ const Effects = {
                 + _sliderHTML(layer,'rippleSpeed','Speed',2,20,0.5,8.0,'rsSpeedVal',' u/s')
                 + _sliderHTML(layer,'rippleWidth','Width',0.3,4,0.1,1.2,'rsWidthVal','')
                 + _sliderHTML(layer,'fadeDuration','Duration',100,3000,50,1500,'rsFadeVal')
-                + _colorPickerHTML(layer);
+                + _colorPickerHTML(layer)
+                + _rainbowCheckboxHTML(layer);
+
         },
         serializeExtra: ()=>({}),
     },
@@ -396,7 +418,9 @@ const Effects = {
                 + _sliderHTML(layer,'trailLength','Trail',0.3,5,0.1,3.0,'mTrailVal','')
                 + _sliderHTML(layer,'sitDuration','Sit',0,1000,25,200,'mSitVal')
                 + _sliderHTML(layer,'fadeDuration','Fade',50,2000,50,400,'rsFadeVal')
-                + _colorPickerHTML(layer);
+                + _colorPickerHTML(layer)
+                + _rainbowCheckboxHTML(layer);
+
         },
         serializeExtra(layer) { return { fallDuration:layer.fallDuration??600, trailLength:layer.trailLength??3.0, sitDuration:layer.sitDuration??200 }; },
     },
@@ -436,7 +460,9 @@ const Effects = {
         settingsHTML(layer) {
             return _holdModeHTML(layer,'lightningHoldMode',[['once','ONE PER PRESS'],['continuous','CONTINUOUS']])
                 + _sliderHTML(layer,'fadeDuration','Fade',50,2000,50,500,'rsFadeVal')
-                + _colorPickerHTML(layer);
+                + _colorPickerHTML(layer)
+                + _rainbowCheckboxHTML(layer);
+
         },
         serializeExtra: ()=>({}),
     },
@@ -470,10 +496,13 @@ const LayerTypes = {
 
     reactive: {
         snapshot(layer) {
-            // In single-layer (editing) view: show painted key colors so you can see what you've painted.
-            // In composite view: run the live effect so you see the animation.
-            // layerViewMode is a global — checked here at snapshot time.
             if (typeof layerViewMode !== 'undefined' && layerViewMode !== 'composite') {
+                // Rainbow mode: return sentinel {rainbow:true} for each painted key
+                if (layer.rainbow) {
+                    const out = {};
+                    Object.keys(layer.colors||{}).forEach(k => { out[k] = {rainbow:true}; });
+                    return out;
+                }
                 return layer.colors || {};
             }
             const effect = Effects[layer.effect||'highlight'];
@@ -489,6 +518,7 @@ const LayerTypes = {
                 effect:            layer.effect||'highlight',
                 color:             layer.color||{r:255,g:255,b:255},
                 colors:            layer.colors||{},
+                rainbow:           !!layer.rainbow,
                 holdMode:          layer.holdMode||'fade',
                 fadeDuration:      layer.fadeDuration??500,
                 rippleSpeed:       layer.rippleSpeed??8.0,
@@ -506,6 +536,7 @@ const LayerTypes = {
                 effect:            effectId,
                 color:             data.color||{r:255,g:255,b:255},
                 colors:            _normalizeColors(data.colors||{}),
+                rainbow:           !!data.rainbow,
                 holdMode:          data.holdMode||'fade',
                 fadeDuration:      data.fadeDuration ?? defs.fadeDuration ?? 500,
                 rippleSpeed:       data.rippleSpeed  ?? defs.rippleSpeed  ?? 8.0,
@@ -556,6 +587,7 @@ function removeLayer(id) {
     if (nowActive?.type==='animation'&&!_layerAnimActive) _mountLayerAnimEditor(nowActive);
     else if ((!nowActive||nowActive.type!=='animation')&&_layerAnimActive) _unmountLayerAnimEditor();
     _syncLayerAnimControls();
+    _syncControlsToLayer();
 }
 function selectLayer(id) {
     if (applyLayersActive||isPlaying) _stopAllPlayback();
@@ -665,7 +697,12 @@ function compositeLayers() {
     return out;
 }
 function _paintKeyboardFromMap(colorMap) {
-    Object.keys(keyEls).forEach(idx => { const c=colorMap[idx]; c?paintKey(idx,c.r,c.g,c.b):unpaintKey(idx); });
+    Object.keys(keyEls).forEach(idx => {
+        const c=colorMap[idx];
+        if (!c) { unpaintKey(idx); return; }
+        if (c.rainbow) { if(typeof paintKeyRainbow==='function') paintKeyRainbow(idx); return; }
+        paintKey(idx,c.r,c.g,c.b);
+    });
 }
 function _refreshKeyboard() {
     if (!layersPanelOpen) return;
@@ -677,7 +714,7 @@ function _sendLayersSnapshot() {
     if (!hasPyAPILayers()) return;
     const map=(layerViewMode==='composite')?compositeLayers():(()=>{const l=getActiveLayer();return l?getLayerSnapshot(l):{};})();
     const payload={};
-    Object.entries(map).forEach(([idx,{r,g,b}])=>{if(r||g||b)payload[idx]=[r,g,b];});
+    Object.entries(map).forEach(([idx,c])=>{if(c&&!c.rainbow&&(c.r||c.g||c.b))payload[idx]=[c.r,c.g,c.b];});
     window.pywebview.api.apply_frame(payload);
 }
 function startCompositor() {
@@ -697,7 +734,7 @@ function _compositorTick() {
         _paintKeyboardFromMap(map);
         if (hasPyAPILayers()&&applyLayersActive) {
             const payload={};
-            Object.entries(map).forEach(([idx,{r,g,b}])=>{if(r||g||b)payload[idx]=[r,g,b];});
+            Object.entries(map).forEach(([idx,c])=>{if(c&&!c.rainbow&&(c.r||c.g||c.b))payload[idx]=[c.r,c.g,c.b];});
             window.pywebview.api.apply_frame(payload);
         }
     }
@@ -762,8 +799,11 @@ async function _pollReactiveLayers() {
             if (!layer._reactiveColors) layer._reactiveColors={};
             const state=(layer.effect==='highlight')?layer._reactiveColors:layer._ripples;
             res.events.forEach(ev => {
-                const idx=ev.led, perKey=layer.colors?.[idx];
+                const idx=ev.led;
+                let perKey=layer.colors?.[idx];
                 if (!perKey) { if(ev.type==='release')effectDef.onRelease(state,idx,now,layer); return; }
+                // Rainbow: pick a random vivid color on press (once-per-press guarded by _heldKeys in onPress)
+                if (ev.type==='press' && layer.rainbow && !layer._heldKeys?.has(idx)) perKey = _randomRainbowRGB();
                 if (ev.type==='press')   effectDef.onPress(state,idx,perKey,now,layer);
                 if (ev.type==='release') effectDef.onRelease(state,idx,now,layer);
             });
@@ -774,6 +814,8 @@ async function _syncReactiveConfig() {
     if (!hasPyAPILayers()) return;
     const reactiveLayers=layers.filter(l=>l.type==='reactive'&&l.enabled).map(l=>({
         effect:l.effect||'highlight', color:l.color||{r:255,g:255,b:255}, colors:l.colors||{},
+        rainbow:!!l.rainbow,
+
         holdMode:l.holdMode||'fade',
         fadeDuration: (l.holdMode==='toggle-on'||l.holdMode==='toggle-off') ? 0 : (l.fadeDuration??500), opacity:(l.opacity??100)/100,
         rippleSpeed:l.rippleSpeed??8.0, rippleWidth:l.rippleWidth??1.2,
@@ -821,8 +863,15 @@ function _syncControlsToLayer() {
     });
     const isReactive=layer?.type==='reactive';
     const reactiveStrip=document.getElementById('reactiveStripWrap');
-    if(reactiveStrip)reactiveStrip.style.display=(isReactive&&layersPanelOpen)?'block':'none';
-    if(isReactive&&layersPanelOpen)renderReactiveEffectList(layer);
+    if(reactiveStrip) reactiveStrip.style.display=(isReactive&&layersPanelOpen)?'block':'none';
+    // Always re-render reactive list — clear first to force update even if previously reactive
+    if(isReactive&&layersPanelOpen) {
+        const el=document.getElementById('reactiveEffectList');
+        const settingsEl=document.getElementById('reactiveEffectSettings');
+        if(el) el.innerHTML='';
+        if(settingsEl) settingsEl.innerHTML='';
+        renderReactiveEffectList(layer);
+    }
 }
 
 // ── Layer strip rendering ─────────────────────────────────────────────────────
@@ -953,7 +1002,8 @@ function renderLayerPresetList() {
             _stopAllPlayback(); if(_layerAnimActive)_unmountLayerAnimEditor(true);
             _deserializeLayers(preset.layers); renderLayerStrip(); _refreshKeyboard();
             const active=getActiveLayer(); if(active?.type==='animation')_mountLayerAnimEditor(active);
-            _syncLayerAnimControls(); if(typeof toast==='function')toast(`Loaded "${preset.name}"`);
+            _syncLayerAnimControls(); _syncControlsToLayer();
+            if(typeof toast==='function')toast(`Loaded "${preset.name}"`);
         });
         item.querySelector('.del-btn').addEventListener('click',async()=>{await window.pywebview.api.delete_layer_preset(fname);await loadLayerPresets();});
         el.appendChild(item);

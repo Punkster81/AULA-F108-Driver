@@ -106,6 +106,36 @@
             </div>
         </div>
 
+        <!-- SOUNDBOARD MODE left panel -->
+        <div id="soundboardLeft" style="display:none;margin-top:12px">
+            <div class="panel-title" style="margin-bottom:6px">VC Output</div>
+            <div style="font-size:0.6rem;color:var(--dim);margin-bottom:10px;line-height:1.7">
+                Route sounds to a virtual cable so others in a call can hear them.
+            </div>
+            <div id="sbVbStatus" style="margin-bottom:10px">
+                <div style="font-size:0.6rem;color:var(--dim)">Checking for VB-Audio...</div>
+            </div>
+            <select id="sbVcDeviceSelect" class="layer-picker-select" style="width:100%;margin-bottom:6px" onchange="setSbVcDevice(this.value)">
+                <option value="">— None (speakers only) —</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.62rem;color:var(--dim);cursor:pointer;margin-bottom:10px">
+                <input type="checkbox" id="sbVcToggle" checked onchange="setSbVcEnabled(this.checked)">
+                Send to VC output
+            </label>
+            <div style="height:1px;background:var(--border);margin-bottom:10px"></div>
+            <div id="sbSetupGuide" style="display:none">
+                <div class="panel-title" style="margin-bottom:6px">Discord / Game Setup</div>
+                <div style="font-size:0.58rem;color:var(--dim);line-height:1.8">
+                    1. Select <b style="color:var(--text)">CABLE Input</b> as VC Output above<br>
+                    2. In Discord → Voice → Input Device, select <b style="color:var(--text)">CABLE Output</b><br>
+                    3. To mix your mic: Control Panel → Sound → Recording → right-click mic → Properties → Listen → check <b style="color:var(--text)">Listen to this device</b> → playback to <b style="color:var(--text)">CABLE Input</b>
+                </div>
+                <div style="margin-top:8px;padding:7px 9px;background:rgba(243,156,18,0.08);border:1px solid rgba(243,156,18,0.3);border-radius:5px;font-size:0.57rem;color:#f39c12;line-height:1.7">
+                    ⚠ Each app needs its mic input set to <b>CABLE Output</b> individually — or set it as your Windows default recording device to cover all apps at once.
+                </div>
+            </div>
+        </div>
+
         <!-- SHARED: Swatches + Recent -->
         <div style="margin-top:12px">
             <div class="swatch-tabs">
@@ -141,6 +171,7 @@
             <div class="mode-btn-group" id="topModeGroup">
                 <button class="tb-btn mode-btn active-mode" id="staticModeBtn"  onclick="switchTopMode('static')">💾 FLASH</button>
                 <button class="tb-btn mode-btn"             id="layersPanelBtn" onclick="switchTopMode('layers')">⚡ LAYERS</button>
+                <button class="tb-btn mode-btn"             id="soundboardBtn"  onclick="switchTopMode('soundboard')">🔊 SOUNDBOARD</button>
             </div>
             <span class="selection-info" id="selInfo" style="display:none">0 keys selected</span>
         </div>
@@ -200,6 +231,11 @@
         </div>
         <div id="layerHint" style="display:none;font-size:0.62rem;color:var(--dim);line-height:1.8">
             <b style="color:var(--accent)">SELECT A LAYER</b> below · then <b style="color:var(--muted)">PAINT</b> keys onto it
+        </div>
+
+        <!-- Soundboard card grid sits below keyboard -->
+        <div id="sbPanel" style="display:none;margin-top:12px">
+            <div id="sbCardGrid" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start"></div>
         </div>
     </div>
 
@@ -281,6 +317,9 @@
 
         </div>
 
+        <!-- SOUNDBOARD MODE right — empty, content moved to left panel -->
+        <div id="soundboardRight" style="display:none"></div>
+
     </div>
 </main>
 
@@ -298,6 +337,7 @@
 <script src="main.js"></script>
 <script src="flash.js"></script>
 <script src="layers.js"></script>
+<script src="soundboard.js"></script>
 <script>
     // Refresh load layer list when flash presets reload
     const _origLoadStatic = loadStaticLightingsFromDisk;

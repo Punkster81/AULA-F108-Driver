@@ -200,13 +200,19 @@ function paintKey(idx, r, g, b) {
     const k=keyEls[idx]; if(!k)return;
     const brightness=Math.sqrt(0.299*r*r+0.587*g*g+0.114*b*b)/255;
     k.style.setProperty('--key-color',`rgb(${r},${g},${b})`);
-    k.classList.add('lit'); k.classList.remove('key-empty');
+    k.classList.add('lit'); k.classList.remove('key-empty'); k.classList.remove('key-rainbow');
     k.style.color=brightness>0.4?'rgba(0,0,0,0.8)':'rgba(255,255,255,0.9)';
+}
+function paintKeyRainbow(idx) {
+    const k=keyEls[idx]; if(!k)return;
+    k.classList.add('lit','key-rainbow'); k.classList.remove('key-empty');
+    k.style.removeProperty('--key-color');
+    k.style.color='';
 }
 function unpaintKey(idx) {
     const k=keyEls[idx]; if(!k)return;
     k.style.setProperty('--key-color','transparent');
-    k.classList.remove('lit'); k.classList.add('key-empty');
+    k.classList.remove('lit','key-rainbow'); k.classList.add('key-empty');
     k.style.color='';
 }
 
@@ -226,7 +232,54 @@ function updateSelPanel() {
         <div style="font-size:0.62rem;color:var(--dim);margin:10px 0 14px;line-height:1.7">${names}</div>
         ${inEraser
             ?`<button class="apply-btn" style="background:#2a1a1a;border-color:#e74c3c;color:#e74c3c" onclick="eraseSelected()">⬜ ERASE SELECTED</button>`
-            :`<button class="apply-btn" onclick="applyColorToSelected()">APPLY COLOR</button>`}`;
+            :`<button class="apply-btn" onclick="applyColorToSelected()">APPLY COLOR</button>`}
+        <div style="height:1px;background:var(--border);margin-top:10px;margin-bottom:6px"></div>
+        <div class="panel-title" style="margin:0 0 6px">Gradient</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center">
+            <span style="font-size:0.6rem;color:var(--dim);flex-shrink:0">From</span>
+            <div style="position:relative;width:32px;height:24px;border-radius:4px;overflow:hidden;border:1px solid var(--border);cursor:pointer" onclick="document.getElementById('gradFrom').click()">
+                <div id="gradFromBox" style="width:100%;height:100%;background:${_gradFrom}"></div>
+                <input type="color" id="gradFrom" value="${_gradFrom}" style="position:absolute;opacity:0;width:0;height:0" oninput="_gradFrom=this.value;document.getElementById('gradFromBox').style.background=this.value">
+            </div>
+            <span style="font-size:0.6rem;color:var(--dim);flex-shrink:0">To</span>
+            <div style="position:relative;width:32px;height:24px;border-radius:4px;overflow:hidden;border:1px solid var(--border);cursor:pointer" onclick="document.getElementById('gradTo').click()">
+                <div id="gradToBox" style="width:100%;height:100%;background:${_gradTo};opacity:${_gradRainbow?'0.35':'1'}"></div>
+                <input type="color" id="gradTo" value="${_gradTo}" style="position:absolute;opacity:0;width:0;height:0" oninput="_gradTo=this.value;document.getElementById('gradToBox').style.background=this.value">
+            </div>
+            <div style="width:1px;height:20px;background:var(--border);margin:0 4px;flex-shrink:0"></div>
+            <label style="display:flex;align-items:center;gap:4px;font-size:0.6rem;color:var(--dim);cursor:pointer">
+                <input type="checkbox" id="gradRainbow" ${_gradRainbow?'checked':''}> Rainbow
+            </label>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+            <span style="font-size:0.6rem;color:var(--dim);width:34px;flex-shrink:0">Skew</span>
+            <input type="range" id="gradSkew" min="-1" max="1" step="0.05" value="${_gradSkew}"
+                oninput="_gradSkew=parseFloat(this.value);document.getElementById('gradSkewVal').textContent=Math.round(this.value*100)+'%'"
+                style="flex:1;height:4px">
+            <span id="gradSkewVal" style="font-size:0.6rem;color:var(--text);min-width:32px;text-align:right">${Math.round(_gradSkew*100)}%</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center">
+            <span style="font-size:0.6rem;color:var(--dim);width:34px;flex-shrink:0">Origin</span>
+            <input type="range" id="gradPos" min="0" max="1" step="0.05" value="${_gradPos}"
+                oninput="_gradPos=parseFloat(this.value);document.getElementById('gradPosVal').textContent=Math.round(this.value*100)+'%'"
+                style="flex:1;height:4px">
+            <span id="gradPosVal" style="font-size:0.6rem;color:var(--text);min-width:32px;text-align:right">${Math.round(_gradPos*100)}%</span>
+        </div>
+        <div style="display:flex;gap:5px;margin-bottom:8px">
+            <button class="layer-type-btn ${_gradDir==='lr'?'active-mode':''}" id="gdir-lr"  onclick="setGradDir('lr')"  title="Left→Right">→</button>
+            <button class="layer-type-btn ${_gradDir==='rl'?'active-mode':''}" id="gdir-rl"  onclick="setGradDir('rl')"  title="Right→Left">←</button>
+            <button class="layer-type-btn ${_gradDir==='tb'?'active-mode':''}" id="gdir-tb"  onclick="setGradDir('tb')"  title="Top→Bottom">↓</button>
+            <button class="layer-type-btn ${_gradDir==='bt'?'active-mode':''}" id="gdir-bt"  onclick="setGradDir('bt')"  title="Bottom→Top">↑</button>
+        </div>
+        <button class="apply-btn" onclick="applyGradient()" style="font-size:0.68rem">🎨 APPLY GRADIENT</button>`;
+
+    // Sync rainbow checkbox — toggle color pickers
+    document.getElementById('gradRainbow').addEventListener('change', function() {
+        _gradRainbow = this.checked;
+        _syncGradRainbow(_gradRainbow);
+    });
+    // Apply initial state if rainbow was already on
+    if (_gradRainbow) _syncGradRainbow(true);
 }
 function eraseSelected() {
     if(!selected.size){toast('No keys selected');return;}
@@ -240,6 +293,114 @@ function applyColorToSelected() {
     toast(`Applied to ${selected.size} key${selected.size!==1?'s':''}`); clearSelection();
 }
 function clearAll() { activeMode.onClearAll(); }
+
+// ── Gradient tool ─────────────────────────────────────────────────────────────
+let _gradDir     = 'lr';
+let _gradFrom    = '#ff0000';
+let _gradTo      = '#0000ff';
+let _gradRainbow = false;
+let _gradSkew    = 0;
+let _gradPos     = 0;
+
+function _syncGradRainbow(on) {
+    const opacity = on ? '0.35' : '1';
+    const fromEl = document.getElementById('gradFrom');
+    const toEl   = document.getElementById('gradTo');
+    const fromBox = document.getElementById('gradFromBox');
+    const toBox   = document.getElementById('gradToBox');
+    if (fromEl)  fromEl.disabled  = on;
+    if (toEl)    toEl.disabled    = on;
+    if (fromBox) fromBox.style.opacity = opacity;
+    if (toBox)   toBox.style.opacity   = opacity;
+}
+
+function setGradDir(dir) {
+    _gradDir = dir;
+    ['lr','rl','tb','bt'].forEach(d => {
+        const btn = document.getElementById(`gdir-${d}`);
+        if (btn) btn.classList.toggle('active-mode', d === dir);
+    });
+}
+
+function applyGradient() {
+    if (!selected.size) { toast('No keys selected'); return; }
+
+    const rainbow  = document.getElementById('gradRainbow')?.checked ?? _gradRainbow;
+    const fromHex  = document.getElementById('gradFrom')?.value || _gradFrom;
+    const toHex    = document.getElementById('gradTo')?.value   || _gradTo;
+    const fromRGB  = _hexToRgb(fromHex);
+    const toRGB    = _hexToRgb(toHex);
+
+    // Get LED coords for selected keys — fall back to [0,0] if not in map
+    const coords = typeof LED_COORDS !== 'undefined' ? LED_COORDS : {};
+    const keys   = [...selected];
+
+    // Find min/max along the chosen axis
+    const axis = (_gradDir === 'lr' || _gradDir === 'rl') ? 0 : 1;
+    let min = Infinity, max = -Infinity;
+    keys.forEach(idx => {
+        const c = coords[idx];
+        const v = c ? c[axis] : 0;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    });
+
+    const range = max - min || 1;
+    const colors = {};
+
+    keys.forEach(idx => {
+        const c = coords[idx];
+        const v = c ? c[axis] : min;
+        let t = (v - min) / range;
+        if (_gradDir === 'rl' || _gradDir === 'bt') t = 1 - t;
+        // Origin: radiates from _gradPos outward in both directions
+        if (_gradPos > 0) {
+            const dist = Math.abs(t - _gradPos);
+            const maxDist = Math.max(_gradPos, 1 - _gradPos);
+            t = Math.min(1, dist / maxDist);
+        }
+        // Skew: positive = bias toward end color, negative = bias toward start color
+        if (_gradSkew !== 0) {
+            const exp = _gradSkew > 0 ? 1 + _gradSkew * 3 : 1 / (1 + Math.abs(_gradSkew) * 3);
+            t = Math.pow(t, exp);
+        }
+
+        let r, g, b;
+        if (rainbow) {
+            const h = t * 0.83; // red → violet, no loop back to red
+            ({r, g, b} = _hsvToRgb(h, 1, 1));
+        } else {
+            r = Math.round(fromRGB.r + (toRGB.r - fromRGB.r) * t);
+            g = Math.round(fromRGB.g + (toRGB.g - fromRGB.g) * t);
+            b = Math.round(fromRGB.b + (toRGB.b - fromRGB.b) * t);
+        }
+        colors[idx] = {r, g, b};
+    });
+
+    // Apply via active mode
+    keys.forEach(idx => {
+        rVal.value = colors[idx].r;
+        gVal.value = colors[idx].g;
+        bVal.value = colors[idx].b;
+        activeMode.onKeyPaint(idx);
+    });
+
+    // Restore color picker to gradient-from color
+    setColorHex(fromHex);
+    toast(`Gradient applied to ${keys.length} keys`);
+    clearSelection();
+}
+
+function _hexToRgb(hex) {
+    const n = parseInt(hex.replace('#',''), 16);
+    return { r: (n>>16)&255, g: (n>>8)&255, b: n&255 };
+}
+function _hsvToRgb(h, s, v) {
+    const i=Math.floor(h*6), f=h*6-i, p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
+    const cases=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]];
+    const [r,g,b]=cases[i%6];
+    return {r:Math.round(r*255),g:Math.round(g*255),b:Math.round(b*255)};
+}
 
 // ── Swatches tabs ─────────────────────────────────────────────────────────────
 function switchSwatchTab(tab) {
@@ -295,6 +456,8 @@ async function connectKeyboard() {
         toast('Connected!'); startStaticStream(); await restoreLastLighting();
         _checkForUpdate();
         window.pywebview.api.get_version().then(r=>{ if(r.ok){const el=document.getElementById('appVersion');if(el)el.textContent=r.version;} });
+        // Start soundboard — loads cards, syncs to driver, starts trigger poller
+        if (typeof initSoundboard==='function') initSoundboard();
     } else {
         status.textContent=r.message; dot.style.background='#ff4444'; dot.style.boxShadow='0 0 8px #ff4444';
         toast(r.message);
@@ -371,12 +534,46 @@ async function setStartup(enable) {
 function switchTopMode(mode) {
     if(typeof deactivateEraser==='function')deactivateEraser();
     if(typeof layersPanelOpen!=='undefined'&&layersPanelOpen) closeLayersPanel();
-    if(mode==='layers')openLayersPanel();
+    if(mode==='layers') openLayersPanel();
+
+    const isSb = mode==='soundboard';
+
+    // Left panel sections
+    document.getElementById('colorSection').style.display  = isSb ? 'none' : '';
+    document.getElementById('staticLeft').style.display    = isSb ? 'none' : '';
+    document.getElementById('soundboardLeft').style.display = isSb ? '' : 'none';
+    // swatches/selection hidden in soundboard
+    document.querySelectorAll('#leftPanel > div:not(#colorSection):not(#staticLeft):not(#layersLeft):not(#soundboardLeft)').forEach(el => {
+        el.style.display = isSb ? 'none' : '';
+    });
+
+    // Right panel sections
+    document.getElementById('staticRight').style.display    = mode==='static'     ? '' : 'none';
+    document.getElementById('layersRight').style.display    = mode==='layers'     ? '' : 'none';
+    document.getElementById('soundboardRight').style.display = isSb              ? '' : 'none';
+
+    // Center: card grid below keyboard
+    document.getElementById('sbPanel').style.display = isSb ? 'block' : 'none';
+    // Disable key interaction in soundboard mode
+    const kb = document.getElementById('keyboard');
+    if (kb) kb.style.pointerEvents = isSb ? 'none' : '';
+    // Hide paint/select toolbar buttons in soundboard mode
+    ['selectModeBtn','paintModeBtn','selectAllBtn','deselectBtn'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isSb ? 'none' : '';
+    });
+    const danger = document.querySelector('#kbToolbar .danger');
+    if (danger) danger.style.display = isSb ? 'none' : '';
+
+    if (isSb && typeof clearSelection==='function') clearSelection();
+    if (isSb && typeof initSoundboard==='function') initSoundboard();
+    if (isSb && typeof _sbShowAllComboDim==='function') setTimeout(_sbShowAllComboDim, 80);
     _syncTopModeBtns(mode);
 }
 function _syncTopModeBtns(mode) {
     document.getElementById('staticModeBtn')?.classList.toggle('active-mode',mode==='static');
     document.getElementById('layersPanelBtn')?.classList.toggle('active-mode',mode==='layers');
+    document.getElementById('soundboardBtn')?.classList.toggle('active-mode',mode==='soundboard');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

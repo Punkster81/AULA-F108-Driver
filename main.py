@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.6'
+VERSION = 'v1.0.0'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -56,13 +56,25 @@ def _download_and_apply_update(asset_url):
         urllib.request.urlretrieve(asset_url, new_exe)
 
         bat = f'''@echo off
-timeout /t 4 /nobreak >nul
+set /a tries=0
+:retry
+timeout /t 1 /nobreak >nul
 move /y "{new_exe}" "{exe_path}"
 if errorlevel 1 (
-    timeout /t 3 /nobreak >nul
-    move /y "{new_exe}" "{exe_path}"
+    set /a tries+=1
+    if %tries% lss 10 goto retry
+    exit /b 1
 )
-powershell -WindowStyle Hidden -Command "Start-Process '{exe_path}' -Verb RunAs"
+set /a ltries=0
+:launch
+start "" "{exe_path}"
+if errorlevel 1 (
+    set /a ltries+=1
+    if %ltries% lss 5 (
+        timeout /t 2 /nobreak >nul
+        goto launch
+    )
+)
 (goto) 2>nul & del "%~f0"
 '''
         with open(bat_path, 'w') as f:
@@ -74,7 +86,10 @@ powershell -WindowStyle Hidden -Command "Start-Process '{exe_path}' -Verb RunAs"
             close_fds=True,
         )
         _send_driver_cmd('STOP')
-        import time; time.sleep(0.5)
+        if _driver_proc is not None:
+            try: _driver_proc.terminate()
+            except: pass
+        import time; time.sleep(1.0)
         os._exit(0)
     except Exception as e:
         print(f'[updater] update failed: {e}', flush=True)
@@ -333,6 +348,8 @@ def lighting_dir():   return _make_dir('lighting')
 def colors_dir():     return _make_dir('colors')
 def layers_dir():     return _make_dir('layers')
 def reactive_dir():   return _make_dir('reactive')
+def soundboard_dir(): return _make_dir('soundboard')
+def sounds_dir():     return _make_dir('soundboard/sounds')
 
 class AnimationAPI:
     def save_current_animation(self, data):
@@ -649,13 +666,277 @@ class AnimationAPI:
 
 
 
+# ── Soundboard API ───────────────────────────────────────────────────────────
+class SoundboardAPI:
+    def _sb_cards_path(self):
+        return os.path.join(soundboard_dir(), 'cards.json')
+
+    def _load_cards(self):
+        try:
+            p = self._sb_cards_path()
+            if not os.path.exists(p): return []
+            with open(p, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def _save_cards(self, cards):
+        with open(self._sb_cards_path(), 'w', encoding='utf-8') as f:
+            json.dump(cards, f, indent=2)
+
+    def _sync_driver(self, cards):
+        def _extract_vk(entry):
+            # combo entries may be {code, vk} dicts or legacy plain ints
+            if isinstance(entry, dict): return entry.get('vk', 0)
+            return int(entry)
+        _send_driver_cmd('SOUNDBOARD_CFG', {'cards': [
+            {'id': c['id'], 'combo': [_extract_vk(e) for e in c.get('combo', [])], 'name': c.get('name', '')}
+            for c in cards
+        ]})
+
+    def list_soundboard_cards(self):
+        try:
+            return {'ok': True, 'cards': self._load_cards()}
+        except Exception as e:
+            return {'ok': False, 'cards': [], 'message': str(e)}
+
+    def save_soundboard_card(self, card):
+        try:
+            cards = self._load_cards()
+            idx = next((i for i,c in enumerate(cards) if c['id']==card['id']), None)
+            if idx is not None:
+                cards[idx] = card
+            else:
+                cards.append(card)
+            self._save_cards(cards)
+            self._sync_driver(cards)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def delete_soundboard_card(self, card_id):
+        try:
+            cards = [c for c in self._load_cards() if c['id'] != card_id]
+            self._save_cards(cards)
+            self._sync_driver(cards)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def pick_and_copy_sound(self, card_id):
+        """Open file dialog, copy chosen file to sounds dir, return path."""
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title='Choose a sound file',
+                filetypes=[('Audio files', '*.mp3 *.wav *.ogg *.flac *.m4a'), ('All files', '*.*')]
+            )
+            root.destroy()
+            if not path:
+                return {'ok': False, 'cancelled': True}
+            import shutil
+            dest_dir = sounds_dir()
+            fname    = f'{card_id}_{os.path.basename(path)}'
+            dest     = os.path.join(dest_dir, fname)
+            shutil.copy2(path, dest)
+            return {'ok': True, 'path': dest, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def read_sound_file(self, path):
+        """Read sound file as base64 so JS can play it via Web Audio."""
+        try:
+            import base64
+            with open(path, 'rb') as f:
+                data = base64.b64encode(f.read()).decode('utf-8')
+            ext = os.path.splitext(path)[1].lower().lstrip('.')
+            mime = {'mp3':'audio/mpeg','wav':'audio/wav','ogg':'audio/ogg',
+                    'flac':'audio/flac','m4a':'audio/mp4'}.get(ext,'audio/mpeg')
+            return {'ok': True, 'data': data, 'mime': mime}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def poll_soundboard_trigger(self, since_ts):
+        """Check if a soundboard trigger has fired since since_ts."""
+        try:
+            if _is_frozen():
+                base = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'AulaF108Driver')
+            else:
+                base = os.path.dirname(os.path.abspath(__file__))
+            path = os.path.join(base, 'soundboard_trigger.json')
+            if not os.path.exists(path):
+                return {'ok': True, 'triggered': False}
+            with open(path, 'r') as f:
+                data = json.load(f)
+            if data.get('ts', 0) > since_ts:
+                return {'ok': True, 'triggered': True, 'id': data['id'], 'ts': data['ts']}
+            return {'ok': True, 'triggered': False}
+        except Exception:
+            return {'ok': True, 'triggered': False}
+
+    def check_vb_audio(self):
+        """Check if VB-Audio Virtual Cable is installed."""
+        try:
+            import subprocess
+
+            # Method 1: Check via PowerShell audio endpoints (most reliable)
+            ps = (
+                'Add-Type -AssemblyName System.Runtime.InteropServices; '
+                'Get-WmiObject Win32_SoundDevice | Select-Object -ExpandProperty Name'
+            )
+            result = subprocess.run(
+                ['powershell', '-NonInteractive', '-Command',
+                 'Get-WmiObject Win32_SoundDevice | Select-Object -ExpandProperty Name'],
+                capture_output=True, text=True, timeout=8
+            )
+            devices = result.stdout.strip().lower()
+            if 'cable' in devices or 'vb-audio' in devices or 'vbcable' in devices:
+                # Find the actual name
+                for line in result.stdout.strip().splitlines():
+                    if any(k in line.lower() for k in ('cable', 'vb-audio', 'vbcable')):
+                        return {'ok': True, 'installed': True, 'device': line.strip()}
+
+            # Method 2: Check registry for the driver
+            ps2 = (
+                'Get-ChildItem "HKLM:\\SYSTEM\\CurrentControlSet\\Services" | '
+                'Where-Object {$_.Name -like "*VBAudioVACMM*" -or $_.Name -like "*vbcable*"} | '
+                'Select-Object -ExpandProperty Name'
+            )
+            result2 = subprocess.run(
+                ['powershell', '-NonInteractive', '-Command', ps2],
+                capture_output=True, text=True, timeout=8
+            )
+            if result2.stdout.strip():
+                return {'ok': True, 'installed': True, 'device': 'VB-Audio Virtual Cable'}
+
+            # Method 3: Check if the driver file exists
+            driver_paths = [
+                r'C:\Windows\System32\drivers\vbcable.sys',
+                r'C:\Windows\SysWOW64\drivers\vbcable.sys',
+            ]
+            for p in driver_paths:
+                if os.path.exists(p):
+                    return {'ok': True, 'installed': True, 'device': 'VB-Audio Virtual Cable'}
+
+            return {'ok': True, 'installed': False}
+
+        except Exception as e:
+            print(f'[soundboard] VB-Audio check failed: {e}', flush=True)
+            # If we can't check, assume it might be there and let user try
+            return {'ok': True, 'installed': False, 'message': str(e)}
+
+    def install_vb_audio(self):
+        """Download and silently install VB-Audio Virtual Cable."""
+        try:
+            import urllib.request
+            import subprocess
+            import zipfile
+            import tempfile
+            import shutil
+
+            url = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip'
+            tmp_dir  = tempfile.mkdtemp(prefix='vbcable_')
+            zip_path = os.path.join(tmp_dir, 'vbcable.zip')
+
+            print(f'[soundboard] Downloading to {zip_path}...', flush=True)
+            urllib.request.urlretrieve(url, zip_path)
+            zip_size = os.path.getsize(zip_path)
+            print(f'[soundboard] Downloaded {zip_size} bytes', flush=True)
+
+            if zip_size < 100000:
+                return {'ok': False, 'message': f'Download too small ({zip_size} bytes) — check internet connection'}
+
+            with zipfile.ZipFile(zip_path, 'r') as z:
+                names = z.namelist()
+                print(f'[soundboard] Zip contents: {names}', flush=True)
+                z.extractall(tmp_dir)
+
+            # List everything extracted
+            all_files = []
+            for root, dirs, files in os.walk(tmp_dir):
+                for f in files:
+                    all_files.append(os.path.join(root, f))
+            print(f'[soundboard] Extracted files: {all_files}', flush=True)
+
+            # Find the 64-bit setup exe — prefer x64, fall back to 32-bit
+            installer = None
+            for preferred in ('VBCABLE_Setup_x64.exe', 'VBCABLE_Setup.exe'):
+                for f in all_files:
+                    if os.path.basename(f) == preferred:
+                        installer = f; break
+                if installer: break
+
+            if not installer:
+                return {'ok': False, 'message': f'No installer found. Files: {[os.path.basename(f) for f in all_files]}'}
+
+            print(f'[soundboard] Running installer: {installer}', flush=True)
+
+            result = subprocess.run(
+                [installer],
+                timeout=120,
+                capture_output=True,
+            )
+            stdout = result.stdout.decode(errors='ignore')
+            stderr = result.stderr.decode(errors='ignore')
+            print(f'[soundboard] pnputil exit code: {result.returncode}', flush=True)
+            if stdout: print(f'[soundboard] stdout: {stdout}', flush=True)
+            if stderr: print(f'[soundboard] stderr: {stderr}', flush=True)
+
+            if result.returncode not in (0, 1, 3010):
+                return {'ok': False, 'message': f'pnputil failed (exit {result.returncode}): {stderr[:300] if stderr else stdout[:300]}'}
+
+            try: shutil.rmtree(tmp_dir, ignore_errors=True)
+            except: pass
+
+            # Poll for the device to actually appear — retry up to 10 seconds
+            import time
+            print('[soundboard] Waiting for device to appear...', flush=True)
+            for attempt in range(10):
+                time.sleep(1)
+                check = self.check_vb_audio()
+                if check.get('installed'):
+                    print(f'[soundboard] Device detected after {attempt+1}s', flush=True)
+                    return {'ok': True, 'installed': True, 'message': 'VB-Audio Virtual Cable installed successfully.'}
+                print(f'[soundboard] Device not yet visible (attempt {attempt+1}/10)...', flush=True)
+
+            # Device still not visible after 10s — needs reboot
+            if result.returncode == 3010:
+                return {'ok': True, 'installed': False, 'needs_restart': True,
+                        'message': 'Driver installed — please restart Windows for the audio device to appear.'}
+
+            # pnputil said success but device never appeared
+            return {'ok': False, 'message': 'Driver install ran but the audio device did not appear. Try restarting Windows, or install VB-Audio manually.'}
+
+        except Exception as e:
+            import traceback
+            print(f'[soundboard] VB-Audio install error:\n{traceback.format_exc()}', flush=True)
+            return {'ok': False, 'message': str(e)}
+
+    def open_vb_audio_page(self):
+        """Open VB-Audio download page in browser as fallback."""
+        try:
+            import webbrowser
+            webbrowser.open('https://vb-audio.com/Cable/')
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+        try:
+            cards = self._load_cards()
+            self._sync_driver(cards)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+
 # ── App entry point ───────────────────────────────────────────────────────────
 def main():
     # Driver already launched and shm already attached at module level
     # (before webview import, to avoid CEF subprocess conflicts)
 
     # Merge both APIs into a single object for pywebview
-    class CombinedAPI(KeyboardAPI, AnimationAPI):
+    class CombinedAPI(KeyboardAPI, AnimationAPI, SoundboardAPI):
         pass
     api = CombinedAPI()
 
@@ -687,3 +968,9 @@ if __name__ == '__main__':
         main()
     except SystemExit:
         pass
+    except Exception as e:
+        traceback.print_exc()
+        input('Press Enter to exit...')
+    except BaseException as e:
+        traceback.print_exc()
+        input('Press Enter to exit...')
