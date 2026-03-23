@@ -566,6 +566,13 @@ function switchTopMode(mode) {
     if (danger) danger.style.display = isSb ? 'none' : '';
 
     if (isSb && typeof clearSelection==='function') clearSelection();
+    if (isSb) {
+        // Wipe painted colors so only soundboard highlights show
+        if (typeof keyColors !== 'undefined') {
+            Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; if (typeof unpaintKey==='function') unpaintKey(idx); });
+        }
+        if (typeof updateFooter==='function') updateFooter();
+    }
     if (isSb && typeof initSoundboardUI==='function') initSoundboardUI();
     if (isSb && typeof _sbShowAllComboDim==='function') setTimeout(_sbShowAllComboDim, 80);
     _syncTopModeBtns(mode);
