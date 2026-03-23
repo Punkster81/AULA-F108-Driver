@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.9'
+VERSION = 'v1.0.10'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -54,32 +54,37 @@ def _download_and_apply_update(asset_url):
 
         print(f'[updater] downloading {asset_url}', flush=True)
         urllib.request.urlretrieve(asset_url, new_exe)
+        print(f'[updater] download complete, size={os.path.getsize(new_exe)}', flush=True)
 
         bat = f'''@echo off
+:: Wait for the old process to fully exit
+timeout /t 2 /nobreak >nul
+
+:: Retry move up to 10 times (1s each)
 set /a tries=0
 :retry
-timeout /t 1 /nobreak >nul
 move /y "{new_exe}" "{exe_path}"
 if errorlevel 1 (
     set /a tries+=1
-    if %tries% lss 10 goto retry
+    if %tries% lss 10 (
+        timeout /t 1 /nobreak >nul
+        goto retry
+    )
+    echo Move failed after 10 attempts
     exit /b 1
 )
-set /a ltries=0
-:launch
-start "" "{exe_path}"
-if errorlevel 1 (
-    set /a ltries+=1
-    if %ltries% lss 5 (
-        timeout /t 2 /nobreak >nul
-        goto launch
-    )
-)
-(goto) 2>nul & del "%~f0"
+
+:: Relaunch with elevation via PowerShell
+powershell -NonInteractive -Command "Start-Process '{exe_path}' -Verb RunAs"
+
+:: Self-delete
+start /b "" cmd /c "timeout /t 2 /nobreak >nul & del /f /q \\"{bat_path}\\""
+exit
 '''
         with open(bat_path, 'w') as f:
             f.write(bat)
 
+        print(f'[updater] launching updater bat: {bat_path}', flush=True)
         _subprocess.Popen(
             ['cmd', '/c', bat_path],
             creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS,
@@ -89,7 +94,7 @@ if errorlevel 1 (
         if _driver_proc is not None:
             try: _driver_proc.terminate()
             except: pass
-        import time; time.sleep(1.0)
+        import time; time.sleep(1.5)
         os._exit(0)
     except Exception as e:
         print(f'[updater] update failed: {e}', flush=True)
