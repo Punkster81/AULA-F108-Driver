@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.10'
+VERSION = 'v1.0.0'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -653,8 +653,13 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
-    def get_version(self):
-        return {'ok': True, 'version': VERSION}
+    def open_data_folder(self):
+        """Open the user data directory in Windows Explorer."""
+        try:
+            _subprocess.Popen(['explorer', _userdata_base()])
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
 
     def check_for_update(self):
         result = _check_for_update()
