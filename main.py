@@ -653,13 +653,8 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
-    def open_data_folder(self):
-        """Open the user data directory in Windows Explorer."""
-        try:
-            _subprocess.Popen(['explorer', _userdata_base()])
-            return {'ok': True}
-        except Exception as e:
-            return {'ok': False, 'message': str(e)}
+    def get_version(self):
+        return {'ok': True, 'version': VERSION}
 
     def open_data_folder(self):
         """Open the user data directory in Windows Explorer."""
