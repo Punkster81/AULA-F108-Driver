@@ -521,6 +521,7 @@ async function restoreLastLighting() {
 // ── Settings modal ────────────────────────────────────────────────────────────
 function openSettings() { document.getElementById('settingsOverlay').classList.add('open'); loadStartupState(); }
 function closeSettings(e) { if(e&&e.target!==document.getElementById('settingsOverlay'))return; document.getElementById('settingsOverlay').classList.remove('open'); }
+function openDataFolder() { if(hasPyAPI()) window.pywebview.api.open_data_folder(); }
 document.addEventListener('keydown', e=>{if(e.key==='Escape')document.getElementById('settingsOverlay').classList.remove('open');});
 async function loadStartupState() { if(!hasPyAPI())return; const r=await window.pywebview.api.get_startup_enabled(); if(r.ok)document.getElementById('startupToggle').checked=r.enabled; }
 async function setStartup(enable) {

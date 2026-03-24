@@ -193,10 +193,13 @@ async function initSoundboard() {
     await loadSoundboardCards();
     _startSbPoller();
     if (hasPyAPI()) {
-        // Wait for driver cmd loop to be ready (it polls every 100ms)
-        await new Promise(r => setTimeout(r, 500));
-        try { await window.pywebview.api.sync_soundboard_to_driver(); } catch(e) {
-            console.error('[soundboard] sync failed:', e);
+        // Retry sync until driver confirms cards received (up to 5s)
+        for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            try {
+                const r = await window.pywebview.api.sync_soundboard_to_driver();
+                if (r?.ok) break;
+            } catch(e) {}
         }
     }
 }
@@ -334,6 +337,10 @@ async function loadSoundboardCards() {
         _sbCards = r.ok ? (r.cards || []) : [];
     } catch(e) { _sbCards = []; }
     renderSoundboardCards();
+    // Async orphan cleanup — don't block card rendering
+    if (hasPyAPI()) {
+        try { await window.pywebview.api.cleanup_orphaned_sounds(_sbCards.map(c => c.soundPath).filter(Boolean)); } catch(e) {}
+    }
 }
 
 // ── Card rendering ────────────────────────────────────────────────────────────
@@ -348,7 +355,8 @@ function renderSoundboardCards() {
         el.dataset.id = card.id;
         el.addEventListener('mouseenter', () => sbCardHover(card.id));
         el.addEventListener('mouseleave', () => sbCardLeave());
-        const hasSound = !!card.soundPath;
+        const hasSound = !!card.soundPath && !card._soundMissing;
+        const soundMissing = card._soundMissing === true;
         const vol = card.volume ?? 100;
         el.innerHTML = `
             <div class="sb-card-header">
@@ -358,7 +366,9 @@ function renderSoundboardCards() {
             <div class="sb-card-combo" id="sbCombo_${card.id}">${_comboLabel(card.combo||[])}</div>
             <div class="sb-card-actions">
                 <button class="sb-btn sb-record-btn" id="sbRec_${card.id}" onclick="startRecording('${card.id}')">⏺ Record Key</button>
-                <button class="sb-btn sb-sound-btn ${hasSound?'has-sound':''}" onclick="pickSound('${card.id}')">${hasSound?'🔊 '+card.soundFilename:'📁 Add Sound'}</button>
+                <button class="sb-btn sb-sound-btn ${hasSound?'has-sound':''} ${soundMissing?'sound-missing':''}" onclick="pickSound('${card.id}')">
+                    ${soundMissing?'⚠ File missing — click to replace':hasSound?'🔊 '+(card.soundFilename.startsWith(card.id+'_')?card.soundFilename.slice(card.id.length+1):card.soundFilename):'📁 Add Sound'}
+                </button>
             </div>
             <div class="sb-vol-row">
                 <span class="sb-vol-label">Vol</span>
@@ -436,7 +446,8 @@ async function deleteSbCard(id) {
 
 async function _saveSbCard(card) {
     if (!hasPyAPI()) return;
-    try { await window.pywebview.api.save_soundboard_card(card); } catch(e) {}
+    const { _soundMissing, ...cardToSave } = card;
+    try { await window.pywebview.api.save_soundboard_card(cardToSave); } catch(e) {}
 }
 
 async function setSbVolume(id, vol) {
@@ -542,6 +553,7 @@ async function pickSound(id) {
         if (!r.ok) { toast('Failed: ' + r.message); return; }
         card.soundPath     = r.path;
         card.soundFilename = r.filename;
+        card._soundMissing = false;  // file now exists
         delete _sbAudioBuffers[id]; // clear cached buffer
         await _saveSbCard(card);
         renderSoundboardCards();
