@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.0'
+VERSION = 'v1.0.10'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -661,6 +661,14 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
+    def open_data_folder(self):
+        """Open the user data directory in Windows Explorer."""
+        try:
+            _subprocess.Popen(['explorer', _userdata_base()])
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
     def check_for_update(self):
         result = _check_for_update()
         if result:
@@ -706,9 +714,30 @@ class SoundboardAPI:
 
     def list_soundboard_cards(self):
         try:
-            return {'ok': True, 'cards': self._load_cards()}
+            cards = self._load_cards()
+            for card in cards:
+                sp = card.get('soundPath')
+                card['_soundMissing'] = bool(sp) and not os.path.exists(sp)
+            return {'ok': True, 'cards': cards}
         except Exception as e:
             return {'ok': False, 'cards': [], 'message': str(e)}
+
+    def cleanup_orphaned_sounds(self, active_paths):
+        """Delete sound files not referenced by any card."""
+        try:
+            d = sounds_dir()
+            active = set(os.path.normcase(p) for p in active_paths if p)
+            removed = []
+            for fname in os.listdir(d):
+                fpath = os.path.join(d, fname)
+                if os.path.isfile(fpath) and os.path.normcase(fpath) not in active:
+                    os.remove(fpath)
+                    removed.append(fname)
+            if removed:
+                print(f'[soundboard] Removed orphaned sounds: {removed}', flush=True)
+            return {'ok': True, 'removed': removed}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
 
     def save_soundboard_card(self, card):
         try:

@@ -528,8 +528,9 @@ class Driver:
             self._held_vks.add(vk)
         elif kind == 'release':
             self._held_vks.discard(vk)
-            self._sb_triggered = {t for t in self._sb_triggered if not any(
-                v not in self._held_vks for v in t
+            # Keep triggered combo until ALL its keys are released
+            self._sb_triggered = {t for t in self._sb_triggered if any(
+                v in self._held_vks for v in t
             )}
 
         if kind != 'press':
@@ -1016,6 +1017,14 @@ class Driver:
 
 def main():
     """Entry point for multiprocessing.Process — works both from source and frozen exe."""
+    # Hide the console window without detaching (keeps stdout/stderr intact)
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass
     Driver().run()
 
 if __name__ == '__main__':

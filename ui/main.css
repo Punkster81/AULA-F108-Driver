@@ -295,7 +295,8 @@
         flex-direction: column;
         gap: 20px;
         background: var(--bg);
-        overflow: hidden;
+        overflow-x: hidden;
+        overflow-y: auto;
     }
 
     .kb-toolbar {
@@ -769,6 +770,8 @@
         padding: 5px 8px;
         text-align: left;
         transition: border-color 0.15s, background 0.15s;
+        min-width: 0;
+        width: 100%;
     }
     .sb-btn:hover { border-color: var(--accent); }
     .sb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -778,7 +781,8 @@
         color: #e74c3c;
         animation: sb-pulse 0.8s ease-in-out infinite;
     }
-    .sb-sound-btn.has-sound { border-color: #2ecc71; color: #2ecc71; font-size: 0.58rem; }
+    .sb-sound-btn.has-sound { border-color: #2ecc71; color: #2ecc71; font-size: 0.58rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-sound-btn.sound-missing { border-color: #e74c3c; color: #e74c3c; font-size: 0.58rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sb-play-btn { background: rgba(124,108,255,0.1); border-color: var(--accent); color: var(--accent); text-align: center; }
     .sb-play-btn:hover:not(:disabled) { background: rgba(124,108,255,0.25); }
     .sb-add-btn {
