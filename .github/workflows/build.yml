@@ -27,7 +27,6 @@ jobs:
           pyinstaller --onefile --windowed `
             --add-data "ui;ui" `
             --icon "icon.ico" `
-            --hidden-import "webview.platforms.edgechromium" `
             --name aula_driver `
             main.py
 
