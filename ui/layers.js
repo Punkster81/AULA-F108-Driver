@@ -717,15 +717,35 @@ function _sendLayersSnapshot() {
     Object.entries(map).forEach(([idx,c])=>{if(c&&!c.rainbow&&(c.r||c.g||c.b))payload[idx]=[c.r,c.g,c.b];});
     window.pywebview.api.apply_frame(payload);
 }
+let _compositorRunning = false;
 function startCompositor() {
-    if (compositorTimer) return;
+    if (_compositorRunning) return;
+    _compositorRunning = true;
     _compositorTick();
     startReactivePoller();
 }
 function stopCompositor() {
-    clearTimeout(compositorTimer); compositorTimer=null;
+    _compositorRunning = false;
+    clearTimeout(compositorTimer); compositorTimer = null;
+    _tickCallback = null;
     stopReactivePoller();
 }
+// ── Unthrottled tick helper ───────────────────────────────────────────────────
+// setTimeout is throttled to ~1s when window is minimized (Chromium behaviour).
+// MessageChannel postMessage is NOT throttled — use it to keep animations smooth.
+const _tickChannel = new MessageChannel();
+let _tickCallback  = null;
+_tickChannel.port2.onmessage = () => { if (_tickCallback) { const cb = _tickCallback; _tickCallback = null; cb(); } };
+function _scheduleCompositorTick(ms, cb) {
+    if (document.hidden && ms < 100) {
+        // Window minimized — use unthrottled MessageChannel
+        _tickCallback = cb;
+        _tickChannel.port1.postMessage(null);
+    } else {
+        setTimeout(cb, ms);
+    }
+}
+
 function _compositorTick() {
     if (layersPanelOpen) {
         const map = layerViewMode==='composite'
@@ -738,7 +758,9 @@ function _compositorTick() {
             window.pywebview.api.apply_frame(payload);
         }
     }
-    compositorTimer=setTimeout(_compositorTick, layersPanelOpen?16:COMPOSITOR_MS);
+    compositorTimer = _compositorRunning
+        ? _scheduleCompositorTick(layersPanelOpen ? 16 : COMPOSITOR_MS, _compositorTick)
+        : null;
 }
 
 // ── Animation ticking ─────────────────────────────────────────────────────────
@@ -750,12 +772,28 @@ function _scheduleNextTick(layer) {
     if (!layer._running) return;
     const frames=layer.frames||[]; if(!frames.length)return;
     const dur=frames[layer._frameIdx]?.duration||100;
-    layer._timer=setTimeout(()=>{
+    const fire = () => {
         if(!layer._running)return;
         const next=(layer._frameIdx+1)%frames.length;
         if(next===0&&!layer.loop){layer._running=false;return;}
         layer._frameIdx=next; _scheduleNextTick(layer);
-    }, dur);
+    };
+    if (document.hidden) {
+        // When hidden, use MessageChannel but track real time to respect duration
+        const start = performance.now();
+        const poll = () => {
+            if (!layer._running) return;
+            if (performance.now() - start >= dur) { fire(); return; }
+            const ch = new MessageChannel();
+            ch.port2.onmessage = poll;
+            ch.port1.postMessage(null);
+        };
+        const ch = new MessageChannel();
+        ch.port2.onmessage = poll;
+        ch.port1.postMessage(null);
+    } else {
+        layer._timer = setTimeout(fire, dur);
+    }
 }
 function _stopAllPlayback() {
     applyLayersActive=false; isPlaying=false;
@@ -1003,6 +1041,8 @@ function renderLayerPresetList() {
             _deserializeLayers(preset.layers); renderLayerStrip(); _refreshKeyboard();
             const active=getActiveLayer(); if(active?.type==='animation')_mountLayerAnimEditor(active);
             _syncLayerAnimControls(); _syncControlsToLayer();
+            const nameInput = document.getElementById('layerPresetNameInput');
+            if (nameInput && preset.name) nameInput.value = preset.name;
             if(typeof toast==='function')toast(`Loaded "${preset.name}"`);
         });
         item.querySelector('.del-btn').addEventListener('click',async()=>{await window.pywebview.api.delete_layer_preset(fname);await loadLayerPresets();});

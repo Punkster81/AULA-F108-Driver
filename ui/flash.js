@@ -83,6 +83,8 @@ async function loadStaticLightingsFromDisk() {
 
 function applyStaticLightingData(data) {
     applyStaticColorMap(data.colors || {});
+    const nameInput = document.getElementById('lightingNameInput');
+    if (nameInput && data.name) nameInput.value = data.name;
     if (typeof toast === 'function') toast(`Loaded "${data.name}"`);
 }
 
