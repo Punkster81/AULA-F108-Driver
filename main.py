@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.11'
+VERSION = 'v1.0.12'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -70,16 +70,15 @@ if errorlevel 1 (
         timeout /t 1 /nobreak >nul
         goto retry
     )
-    echo Move failed after 10 attempts
+    echo Failed to replace exe after 10 attempts
     exit /b 1
 )
 
-:: Relaunch with elevation via PowerShell
-powershell -NonInteractive -Command "Start-Process '{exe_path}' -Verb RunAs"
+:: Relaunch via PowerShell with elevation
+powershell -NonInteractive -WindowStyle Hidden -Command "Start-Process '{exe_path}' -Verb RunAs"
 
 :: Self-delete
-start /b "" cmd /c "timeout /t 2 /nobreak >nul & del /f /q \\"{bat_path}\\""
-exit
+(goto) 2>nul & del "%~f0"
 '''
         with open(bat_path, 'w') as f:
             f.write(bat)
@@ -87,7 +86,7 @@ exit
         print(f'[updater] launching updater bat: {bat_path}', flush=True)
         _subprocess.Popen(
             ['cmd', '/c', bat_path],
-            creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS,
+            creationflags=_subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
         _send_driver_cmd('STOP')
@@ -685,17 +684,43 @@ class SoundboardAPI:
         return os.path.join(soundboard_dir(), 'cards.json')
 
     def _load_cards(self):
+        p = self._sb_cards_path()
+        if not os.path.exists(p):
+            return []
         try:
-            p = self._sb_cards_path()
-            if not os.path.exists(p): return []
             with open(p, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
+                data = json.load(f)
+            if not isinstance(data, list):
+                print(f'[soundboard] cards.json is not a list, resetting', flush=True)
+                return []
+            return data
+        except Exception as e:
+            print(f'[soundboard] Failed to load cards.json: {e}', flush=True)
+            # Try backup
+            bak = p + '.bak'
+            if os.path.exists(bak):
+                try:
+                    with open(bak, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    print(f'[soundboard] Restored from backup', flush=True)
+                    return data if isinstance(data, list) else []
+                except Exception:
+                    pass
             return []
 
     def _save_cards(self, cards):
-        with open(self._sb_cards_path(), 'w', encoding='utf-8') as f:
+        p = self._sb_cards_path()
+        tmp = p + '.tmp'
+        bak = p + '.bak'
+        # Write to temp file first
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(cards, f, indent=2)
+        # Backup existing file
+        if os.path.exists(p):
+            try: os.replace(p, bak)
+            except: pass
+        # Atomically move temp to final
+        os.replace(tmp, p)
 
     def _sync_driver(self, cards):
         def _extract_vk(entry):

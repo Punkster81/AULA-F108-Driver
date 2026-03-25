@@ -193,6 +193,8 @@ async function initSoundboard() {
     await loadSoundboardCards();
     _startSbPoller();
     if (hasPyAPI()) {
+        // Run orphan cleanup once on startup with the full stable card list
+        try { await window.pywebview.api.cleanup_orphaned_sounds(_sbCards.map(c => c.soundPath).filter(Boolean)); } catch(e) {}
         // Retry sync until driver confirms cards received (up to 5s)
         for (let i = 0; i < 10; i++) {
             await new Promise(r => setTimeout(r, 500));
@@ -337,10 +339,6 @@ async function loadSoundboardCards() {
         _sbCards = r.ok ? (r.cards || []) : [];
     } catch(e) { _sbCards = []; }
     renderSoundboardCards();
-    // Async orphan cleanup — don't block card rendering
-    if (hasPyAPI()) {
-        try { await window.pywebview.api.cleanup_orphaned_sounds(_sbCards.map(c => c.soundPath).filter(Boolean)); } catch(e) {}
-    }
 }
 
 // ── Card rendering ────────────────────────────────────────────────────────────
