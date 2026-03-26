@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.13'
+VERSION = 'v1.0.14'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
