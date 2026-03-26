@@ -127,6 +127,23 @@ def _is_running_from_install():
 def _userdata_base():
     return _appdata_dir() if _is_frozen() else os.path.dirname(os.path.abspath(__file__))
 
+def _grouped_to_flat(colors):
+    """Convert grouped {rrggbb:[idx,...]} or flat {idx:[r,g,b]} to flat {idx:[r,g,b]}."""
+    if not colors:
+        return {}
+    first_val = next(iter(colors.values()), None)
+    if isinstance(first_val, list) and first_val and isinstance(first_val[0], str):
+        # Grouped format: {rrggbb: [idx, ...]}
+        out = {}
+        for hex_color, idxs in colors.items():
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            for idx in idxs:
+                out[idx] = [r, g, b]
+        return out
+    return colors  # already flat
+
 def _make_dir(name):
     d = os.path.join(_userdata_base(), name)
     os.makedirs(d, exist_ok=True)
@@ -329,11 +346,11 @@ class KeyboardAPI:
     def apply_colors(self, colors):
         if _shm_frame:
             try:
-                _shm_frame.write(colors)
+                _shm_frame.write(_grouped_to_flat(colors))
                 return {'ok': True}
             except Exception as e:
                 return {'ok': False, 'message': str(e)}
-        return {'ok': True}  # driver still starting, silently skip
+        return {'ok': True}
 
     def apply_frame(self, colors):
         return self.apply_colors(colors)
@@ -343,7 +360,7 @@ class KeyboardAPI:
 
     def save_to_flash(self, colors):
         """Send SAVE_FLASH command to driver process."""
-        _send_driver_cmd('SAVE_FLASH', colors)
+        _send_driver_cmd('SAVE_FLASH', _grouped_to_flat(colors))
         return {'ok': True, 'message': 'Saved — colors will persist after power cycle'}
 
 
@@ -383,20 +400,22 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
-    def save_current_lighting(self, colors):
+    def save_current_lighting(self, colors, name=None):
         """Overwrite lighting/current.json with the latest static color state."""
         try:
             data = {'type': 'static', 'colors': colors}
+            if name: data['name'] = name
             with open(os.path.join(lighting_dir(), 'current.json'), 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
             return {'ok': True}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
-    def save_current_layers(self, layers_data):
+    def save_current_layers(self, layers_data, name=None):
         """Overwrite lighting/current.json with the latest layer stack state."""
         try:
             data = {'type': 'layers', 'layers': layers_data}
+            if name: data['name'] = name
             with open(os.path.join(lighting_dir(), 'current.json'), 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
             return {'ok': True}
@@ -415,17 +434,18 @@ class AnimationAPI:
                 return {'ok': False, 'reason': 'no_current'}
             with open(path, 'r', encoding='utf-8') as f:
                 current = json.load(f)
+            name = current.get('name')
             if current.get('type') == 'layers':
-                return {'ok': True, 'type': 'layers', 'layers': current.get('layers', [])}
+                return {'ok': True, 'type': 'layers', 'layers': current.get('layers', []), 'name': name}
             if current.get('type') == 'animation':
                 anim_path = current.get('file', '')
                 if not os.path.exists(anim_path):
                     return {'ok': False, 'reason': 'missing_file'}
                 with open(anim_path, 'r', encoding='utf-8') as f:
                     anim = json.load(f)
-                return {'ok': True, 'type': 'animation', 'animation': anim}
+                return {'ok': True, 'type': 'animation', 'animation': anim, 'name': name}
             else:
-                return {'ok': True, 'type': 'static', 'colors': current.get('colors', {})}
+                return {'ok': True, 'type': 'static', 'colors': current.get('colors', {}), 'name': name}
         except Exception as e:
             return {'ok': False, 'reason': str(e)}
 

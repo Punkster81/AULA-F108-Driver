@@ -28,7 +28,37 @@ function getActiveLayer()   { return layers.find(l => l.id === activeLayerId) ||
 function hasPyAPILayers()   { return window.pywebview && window.pywebview.api; }
 function _rgbToHex(c)       { return '#' + [c.r,c.g,c.b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join(''); }
 function _normalizeColor(c) { if (!c) return null; if (Array.isArray(c)) return {r:c[0]||0,g:c[1]||0,b:c[2]||0}; return {r:c.r||0,g:c.g||0,b:c.b||0}; }
-function _normalizeColors(colors) { const out={}; Object.entries(colors||{}).forEach(([idx,c])=>{const n=_normalizeColor(c);if(n)out[idx]=n;}); return out; }
+function _normalizeColors(colors) {
+    if (_isGroupedColors(colors)) colors = _groupedToFlat(colors);
+    const out={};
+    Object.entries(colors||{}).forEach(([idx,c])=>{const n=_normalizeColor(c);if(n)out[idx]=n;});
+    return out;
+}
+
+// ── Color grouping: {idx:{r,g,b}} ↔ {rrggbb:[idx,...]} ───────────────────────
+function _colorsToGrouped(colors) {
+    const groups = {};
+    Object.entries(colors || {}).forEach(([idx, c]) => {
+        const r = c.r ?? c[0] ?? 0, g = c.g ?? c[1] ?? 0, b = c.b ?? c[2] ?? 0;
+        const hex = ((r&0xff)<<16|(g&0xff)<<8|(b&0xff)).toString(16).padStart(6,'0');
+        if (!groups[hex]) groups[hex] = [];
+        groups[hex].push(idx);
+    });
+    return groups;
+}
+function _groupedToFlat(grouped) {
+    const out = {};
+    Object.entries(grouped || {}).forEach(([hex, idxs]) => {
+        const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+        idxs.forEach(idx => { out[idx] = {r, g, b}; });
+    });
+    return out;
+}
+// Detect if a colors object is grouped format (values are arrays of strings) or flat
+function _isGroupedColors(colors) {
+    const first = Object.values(colors || {})[0];
+    return Array.isArray(first) && typeof first[0] === 'string';
+}
 
 function _blendInto(out, idx, r, g, b, alpha) {
     const cur = out[idx] || {r:0,g:0,b:0};
@@ -478,17 +508,17 @@ const LayerTypes = {
     static: {
         snapshot(layer)  { return layer.colors || {}; },
         makeDefaults()   { return { colors:{} }; },
-        serialize(layer) { return { colors: layer.colors||{} }; },
+        serialize(layer) { return { colors: _colorsToGrouped(layer.colors||{}) }; },
         deserialize(data){ return { colors: _normalizeColors(data.colors||{}) }; },
     },
 
     animation: {
         snapshot(layer) { return (layer.frames||[])[layer._frameIdx||0]?.colors || {}; },
         makeDefaults()  { return { frames:[], loop:true, _frameIdx:0, _timer:null, _running:false }; },
-        serialize(layer){ return { loop:layer.loop!==false, frames:(layer.frames||[]).map(f=>({duration:f.duration,colors:f.colors||{}})) }; },
+        serialize(layer){ return { loop:layer.loop!==false, frames:(layer.frames||[]).map(f=>({duration:f.duration,colors:_colorsToGrouped(f.colors||{})})) }; },
         deserialize(data){
             return {
-                loop: true, // always loop
+                loop: true,
                 frames: (data.frames||[]).map(f=>({duration:f.duration||100, colors:_normalizeColors(f.colors||{})})),
                 _frameIdx:0, _timer:null, _running:false,
             };
@@ -518,7 +548,7 @@ const LayerTypes = {
             return {
                 effect:            layer.effect||'highlight',
                 color:             layer.color||{r:255,g:255,b:255},
-                colors:            layer.colors||{},
+                colors:            _colorsToGrouped(layer.colors||{}),
                 rainbow:           !!layer.rainbow,
                 holdMode:          layer.holdMode||'fade',
                 fadeDuration:      layer.fadeDuration??500,
@@ -1364,13 +1394,8 @@ function closeLayersPanel() {
 function toggleLayersPanel() { layersPanelOpen?closeLayersPanel():openLayersPanel(); }
 
 // ── Push to keyboard ──────────────────────────────────────────────────────────
-async function _syncLayerConfig(enabled) {
-    if (!hasPyAPILayers()) return;
-    if (!enabled) {
-        try { await window.pywebview.api.update_layer_config([], false); } catch(e) {}
-        return;
-    }
-    const driverLayers = layers.filter(l => l.enabled).map(l => {
+function _buildDriverLayers() {
+    return layers.filter(l => l.enabled).map(l => {
         const base = { type: l.type, opacity: (l.opacity ?? 100) / 100 };
         if (l.type === 'static') {
             const colors = {};
@@ -1402,7 +1427,15 @@ async function _syncLayerConfig(enabled) {
         }
         return base;
     });
-    try { await window.pywebview.api.update_layer_config(driverLayers, true); } catch(e) {}
+}
+
+async function _syncLayerConfig(enabled) {
+    if (!hasPyAPILayers()) return;
+    if (!enabled) {
+        try { await window.pywebview.api.update_layer_config([], false); } catch(e) {}
+        return;
+    }
+    try { await window.pywebview.api.update_layer_config(_buildDriverLayers(), true); } catch(e) {}
 }
 
 function pushLayersToKeyboard() {
@@ -1422,5 +1455,5 @@ function pushLayersToKeyboard() {
         _sendLayersSnapshot();
         if (typeof toast === 'function') toast('⚡ Layers applied (static)');
     }
-    if (hasPyAPILayers()) window.pywebview.api.save_current_layers(_serializeLayers());
+    if (hasPyAPILayers()) window.pywebview.api.save_current_layers(_serializeLayers(), document.getElementById('layerPresetNameInput')?.value?.trim() || null);
 }

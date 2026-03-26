@@ -12,11 +12,15 @@
 // savedLightings is the disk-backed preset store (also read by layers.js pickers).
 let savedLightings = {};
 
-// Builds a {idx: [r,g,b]} payload from keyColors for hardware sends
+// Builds a {idx: [r,g,b]} payload from keyColors for hardware sends (apply_frame)
 function _buildFlashPayload() {
     const payload = {};
     Object.entries(keyColors).forEach(([idx, {r,g,b}]) => { if (r||g||b) payload[idx] = [r,g,b]; });
     return payload;
+}
+// Builds a grouped {rrggbb:[idx,...]} payload for disk saves
+function _buildGroupedPayload() {
+    return typeof _colorsToGrouped === 'function' ? _colorsToGrouped(keyColors) : _buildFlashPayload();
 }
 
 // ── Continuous stream ─────────────────────────────────────────────────────────
@@ -51,10 +55,10 @@ async function applyToKeyboard() {
 async function saveToFlash() {
     if (!window.pywebview?.api) { if (typeof toast === 'function') toast('Run via python main.py to connect'); return; }
     if (typeof toast === 'function') toast('Saving to flash...');
-    const payload = _buildFlashPayload();
-    const r = await window.pywebview.api.save_to_flash(payload);
+    const flatPayload = _buildFlashPayload();
+    const r = await window.pywebview.api.save_to_flash(flatPayload);
     if (r.ok) {
-        window.pywebview.api.save_current_lighting(payload);
+        window.pywebview.api.save_current_lighting(_buildGroupedPayload(), document.getElementById('lightingNameInput')?.value?.trim() || null);
         if (typeof toast === 'function') toast('💾 ' + r.message);
     } else {
         if (typeof toast === 'function') toast(r.message);
@@ -66,7 +70,7 @@ async function saveStaticLighting() {
     if (!window.pywebview?.api) { if (typeof toast === 'function') toast('Run via python main.py'); return; }
     const name = document.getElementById('lightingNameInput')?.value?.trim() || 'lighting';
     if (!Object.keys(keyColors).length) { if (typeof toast === 'function') toast('No colors to save'); return; }
-    const r = await window.pywebview.api.save_static_lighting(name, _buildFlashPayload());
+    const r = await window.pywebview.api.save_static_lighting(name, _buildGroupedPayload());
     if (r.ok) { if (typeof toast === 'function') toast(`Saved "${name}"`); await loadStaticLightingsFromDisk(); }
     else if (typeof toast === 'function') toast('Save failed: ' + (r.message || ''));
 }
@@ -113,6 +117,8 @@ function renderSavedLightingList() {
 
 // ── Color map helpers (shared with layers.js via keyColors) ───────────────────
 function applyStaticColorMap(colors) {
+    // Handle grouped format {rrggbb:[idx,...]} or flat {idx:[r,g,b]} or {idx:{r,g,b}}
+    if (typeof _isGroupedColors === 'function' && _isGroupedColors(colors)) colors = _groupedToFlat(colors);
     Object.keys(keyColors).forEach(idx => { delete keyColors[idx]; unpaintKey(idx); });
     Object.entries(colors).forEach(([idx, rgb]) => {
         const [rv,gv,bv] = Array.isArray(rgb) ? rgb : [rgb.r, rgb.g, rgb.b];

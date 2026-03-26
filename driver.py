@@ -338,6 +338,22 @@ for _idx, (_x, _y) in LED_COORDS.items():
 for _r in _LED_ROWS:
     _LED_ROWS[_r].sort()
 
+def _grouped_to_flat(colors):
+    """Convert grouped {rrggbb:[idx,...]} or flat {idx:[r,g,b]} to flat {idx:[r,g,b]}."""
+    if not colors:
+        return {}
+    first_val = next(iter(colors.values()), None)
+    if isinstance(first_val, list) and first_val and isinstance(first_val[0], str):
+        out = {}
+        for hex_color, idxs in colors.items():
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            for idx in idxs:
+                out[idx] = [r, g, b]
+        return out
+    return colors
+
 def _random_rainbow_rgb():
     """Return a random vivid hue as (r, g, b) integers."""
     h = random.random()
@@ -448,6 +464,7 @@ class Driver:
             return True
 
     def _send_frame(self, colors):
+        colors = _grouped_to_flat(colors)
         with self._kb_lock:
             if not self._kb: return
             try:
@@ -575,14 +592,14 @@ class Driver:
                 layer_type = layer.get('type', 'static')
                 opacity    = layer.get('opacity', 1.0)
                 if layer_type == 'static':
-                    for idx, rgb in layer.get('colors', {}).items():
+                    for idx, rgb in _grouped_to_flat(layer.get('colors', {})).items():
                         if isinstance(rgb, (list, tuple)) and len(rgb) >= 3:
                             self._blend_into(frame, idx, rgb[0], rgb[1], rgb[2], opacity)
                 elif layer_type == 'animation':
                     frames = layer.get('frames', [])
                     if not frames: continue
                     fidx   = layer.get('_frame_idx', 0)
-                    colors = frames[fidx].get('colors', {}) if fidx < len(frames) else {}
+                    colors = _grouped_to_flat(frames[fidx].get('colors', {})) if fidx < len(frames) else {}
                     for idx, rgb in colors.items():
                         if isinstance(rgb, (list, tuple)) and len(rgb) >= 3:
                             self._blend_into(frame, idx, rgb[0], rgb[1], rgb[2], opacity)
@@ -857,7 +874,7 @@ class Driver:
                 active    = layer_state['active']
                 held_keys = layer_state['held_keys']
                 effect    = cfg.get('effect', 'highlight')
-                per_key   = cfg.get('colors', {})
+                per_key   = _grouped_to_flat(cfg.get('colors', {}))
                 c         = per_key.get(led)
                 if c is None:
                     # No color painted on this key — handle releases only

@@ -507,14 +507,31 @@ async function _applyUpdate(url) {
 async function restoreLastLighting() {
     if(!hasPyAPI())return;
     const r=await window.pywebview.api.load_current_lighting();
-    if(r.ok&&r.type==='static'){applyStaticColorMap(r.colors);await window.pywebview.api.apply_frame(_buildFlashPayload());return;}
+    if(r.ok&&r.type==='static'){
+        applyStaticColorMap(r.colors);
+        await window.pywebview.api.apply_frame(_buildFlashPayload());
+        const nameInput=document.getElementById('lightingNameInput');
+        if(nameInput&&r.name) nameInput.value=r.name;
+        return;
+    }
     if(r.ok&&r.type==='layers'){
         openLayersPanel(); _syncTopModeBtns('layers'); _deserializeLayers(r.layers); renderLayerStrip();
         _syncControlsToLayer(); _refreshKeyboard();
         const hasAnim=layers.some(l=>l.type==='animation'&&l.enabled);
+        const hasReactive=layers.some(l=>l.type==='reactive'&&l.enabled);
         setLayerViewMode('composite');
-        if(hasAnim){applyLayersActive=true;_startAllLayerAnims();startCompositor();_syncAllPlayBtns(true);}
-        else{applyLayersActive=false;_sendLayersSnapshot();}
+        if(hasAnim||hasReactive){
+            applyLayersActive=true; _startAllLayerAnims(); startCompositor(); _syncAllPlayBtns(true);
+            _syncReactiveConfig();
+            // Retry until driver confirms it received the layer config (up to 3s)
+            for(let i=0;i<6;i++){
+                await new Promise(res=>setTimeout(res,500));
+                try{ const ok=await window.pywebview.api.update_layer_config(
+                    _buildDriverLayers(), true); if(ok?.ok) break; }catch(e){}
+            }
+        } else { applyLayersActive=false; _sendLayersSnapshot(); }
+        const nameInput=document.getElementById('layerPresetNameInput');
+        if(nameInput&&r.name) nameInput.value=r.name;
         return;
     }
     const ls=await window.pywebview.api.list_static_lightings();
