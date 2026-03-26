@@ -637,6 +637,14 @@ class AnimationAPI:
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 
+    def update_layer_config(self, layers, enabled):
+        """Send full layer stack to driver for hardware-side compositing."""
+        try:
+            _send_driver_cmd('LAYER_CFG', {'layers': layers, 'enabled': bool(enabled)})
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
     def start_key_listener(self):
         return {'ok': True}
 

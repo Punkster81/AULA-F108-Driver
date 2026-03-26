@@ -117,6 +117,8 @@ ROWS.forEach((row,ri)=>{
 });
 kbWrap.appendChild(mainBlock);
 
+// Nav and numpad start at row 1 of the main block (F-key row).
+// Each key row = 38px + 5px gap = 43px. Row 1 (F-keys) aligns with nav row 1.
 const navBlock=document.createElement('div');
 navBlock.style.cssText='display:grid;grid-template-columns:repeat(3,38px);grid-template-rows:repeat(6,38px);gap:4px;';
 NAV.forEach(([label,idx,col,row])=>{
@@ -124,8 +126,10 @@ NAV.forEach(([label,idx,col,row])=>{
 });
 kbWrap.appendChild(navBlock);
 
+// Numpad: 5 rows of keys + row 1 blank (NumLock row aligns with number row).
+// Offset by 1 main row (43px) so NumLock aligns with the number row.
 const numBlock=document.createElement('div');
-numBlock.style.cssText='display:grid;grid-template-columns:repeat(4,38px);grid-template-rows:repeat(6,38px);gap:4px;align-self:flex-end;';
+numBlock.style.cssText='display:grid;grid-template-columns:repeat(4,38px);grid-template-rows:repeat(5,38px);gap:4px;margin-top:42px;';
 let npCol=1,npRow=1;
 NUMPAD.forEach(([label,idx,colSpan,rowSpan])=>{
     if(!idx){npCol+=colSpan;if(npCol>4){npCol=1;npRow++;}return;}

@@ -49,6 +49,7 @@ function _setReactiveParam(key, val, labelId, labelSuffix='') {
     if (el) el.textContent = val + labelSuffix;
     _reactiveSynced = false;
     _syncReactiveConfig();
+    if (applyLayersActive) _syncLayerConfig(true);
 }
 function setReactiveParam(key, val) { _setReactiveParam(key, val); }
 
@@ -752,7 +753,10 @@ function _compositorTick() {
             ? compositeLayers()
             : (()=>{ const l=getActiveLayer(); return l?getLayerSnapshot(l):{}; })();
         _paintKeyboardFromMap(map);
-        if (hasPyAPILayers()&&applyLayersActive) {
+        // Only send apply_frame if driver is NOT handling the layer stack
+        // (driver handles it when layer stack has animation or reactive layers)
+        const driverHandles = applyLayersActive && layers.some(l => l.enabled && (l.type==='animation' || l.type==='reactive'));
+        if (hasPyAPILayers() && applyLayersActive && !driverHandles) {
             const payload={};
             Object.entries(map).forEach(([idx,c])=>{if(c&&!c.rainbow&&(c.r||c.g||c.b))payload[idx]=[c.r,c.g,c.b];});
             window.pywebview.api.apply_frame(payload);
@@ -799,13 +803,13 @@ function _stopAllPlayback() {
     applyLayersActive=false; isPlaying=false;
     clearTimeout(previewTimer);
     _stopAllLayerAnims();
-    // Reset all animation layers to frame 0
     layers.forEach(l => {
         if (l.type==='animation') l._frameIdx=0;
         if (l.type==='reactive') { l._reactiveColors={}; l._ripples=[]; l._heldKeys=new Set(); }
     });
     if (_layerAnimActive && animFrames?.length) selectAnimFrame(0);
     _syncReactiveConfig();
+    _syncLayerConfig(false);
     _syncAllPlayBtns(false);
 }
 
@@ -869,6 +873,7 @@ function setReactiveColor(hex) {
     const layer=getActiveLayer(); if(!layer||layer.type!=='reactive')return;
     layer.color={r:parseInt(hex.slice(1,3),16),g:parseInt(hex.slice(3,5),16),b:parseInt(hex.slice(5,7),16)};
     _reactiveSynced=false; _syncReactiveConfig();
+    if (applyLayersActive) _syncLayerConfig(true);
 }
 function renderReactiveEffectList(layer) {
     const el=document.getElementById('reactiveEffectList');
@@ -887,6 +892,7 @@ function renderReactiveEffectList(layer) {
             layer.effect=id; layer._ripples=[]; layer._reactiveColors={};
             Object.assign(layer, LayerTypes.reactive.deserialize({...LayerTypes.reactive.serialize(layer),effect:id}));
             renderReactiveEffectList(layer); _reactiveSynced=false; _syncReactiveConfig();
+            if (applyLayersActive) _syncLayerConfig(true);
         });
         el.appendChild(card);
     });
@@ -1358,17 +1364,63 @@ function closeLayersPanel() {
 function toggleLayersPanel() { layersPanelOpen?closeLayersPanel():openLayersPanel(); }
 
 // ── Push to keyboard ──────────────────────────────────────────────────────────
+async function _syncLayerConfig(enabled) {
+    if (!hasPyAPILayers()) return;
+    if (!enabled) {
+        try { await window.pywebview.api.update_layer_config([], false); } catch(e) {}
+        return;
+    }
+    const driverLayers = layers.filter(l => l.enabled).map(l => {
+        const base = { type: l.type, opacity: (l.opacity ?? 100) / 100 };
+        if (l.type === 'static') {
+            const colors = {};
+            Object.entries(l.colors || {}).forEach(([idx, c]) => { colors[idx] = [c.r, c.g, c.b]; });
+            base.colors = colors;
+        } else if (l.type === 'animation') {
+            base.loop   = l.loop !== false;
+            base.frames = (l.frames || []).map(f => {
+                const colors = {};
+                Object.entries(f.colors || {}).forEach(([idx, c]) => {
+                    colors[idx] = Array.isArray(c) ? c : [c.r, c.g, c.b];
+                });
+                return { duration: f.duration || 100, colors };
+            });
+        } else if (l.type === 'reactive') {
+            base.effect            = l.effect || 'highlight';
+            base.colors            = {};
+            Object.entries(l.colors || {}).forEach(([idx, c]) => { base.colors[idx] = [c.r, c.g, c.b]; });
+            base.rainbow           = !!l.rainbow;
+            base.holdMode          = l.holdMode || 'fade';
+            base.fadeDuration      = l.fadeDuration ?? 500;
+            base.rippleHoldMode    = l.rippleHoldMode ?? 'once';
+            base.rippleSpeed       = l.rippleSpeed ?? 8.0;
+            base.rippleWidth       = l.rippleWidth ?? 1.2;
+            base.fallDuration      = l.fallDuration ?? 600;
+            base.trailLength       = l.trailLength ?? 3.0;
+            base.sitDuration       = l.sitDuration ?? 200;
+            base.lightningHoldMode = l.lightningHoldMode ?? 'once';
+        }
+        return base;
+    });
+    try { await window.pywebview.api.update_layer_config(driverLayers, true); } catch(e) {}
+}
+
 function pushLayersToKeyboard() {
     setLayerViewMode('composite');
-    const needsStream=layers.some(l=>l.enabled&&(l.type==='animation'||l.type==='reactive'));
-    if(needsStream){
-        applyLayersActive=true;_startAllLayerAnims();
-        stopCompositor();startCompositor();
-        _syncAllPlayBtns(true);_syncReactiveConfig();
-        if(typeof toast==='function')toast('⚡ Layers streaming to keyboard');
+    const needsStream = layers.some(l => l.enabled && (l.type==='animation' || l.type==='reactive'));
+    if (needsStream) {
+        applyLayersActive = true;
+        _startAllLayerAnims();
+        stopCompositor(); startCompositor();
+        _syncAllPlayBtns(true);
+        _syncReactiveConfig(); // keep reactive poller working for UI preview
+        _syncLayerConfig(true); // driver handles hardware output
+        if (typeof toast === 'function') toast('⚡ Layers streaming to keyboard');
     } else {
-        applyLayersActive=false;_sendLayersSnapshot();
-        if(typeof toast==='function')toast('⚡ Layers applied (static)');
+        applyLayersActive = false;
+        _syncLayerConfig(false);
+        _sendLayersSnapshot();
+        if (typeof toast === 'function') toast('⚡ Layers applied (static)');
     }
-    if(hasPyAPILayers())window.pywebview.api.save_current_layers(_serializeLayers());
+    if (hasPyAPILayers()) window.pywebview.api.save_current_layers(_serializeLayers());
 }

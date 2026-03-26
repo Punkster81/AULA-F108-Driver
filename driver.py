@@ -421,6 +421,9 @@ class Driver:
         self._reactive_enabled = False
         self._reactive_lock = threading.Lock()
         self._base_frame  = {}
+        self._layer_stack         = []
+        self._layer_stack_enabled = False
+        self._layer_stack_lock    = threading.Lock()
         self._send_queue  = queue.Queue(maxsize=8)
         self._soundboard_cards = []   # list of {id, combo:[vk,...], name}
         self._soundboard_lock  = threading.Lock()
@@ -475,15 +478,12 @@ class Driver:
 
     # ── Shared memory frame reader ────────────────────────────────────────────
     def _frame_reader_thread(self):
-        """Reads compositor frames from shm. When reactive is active, just updates
-        base_frame — the reactive engine sends its own composite frames on keypresses
-        and via the fade ticker. When reactive is inactive, sends frames normally."""
         while self._running:
             try:
                 colors = self._shm_frame.read_if_new()
                 if colors is not None:
                     self._base_frame = colors
-                    if not self._reactive_enabled:
+                    if not self._reactive_enabled and not self._layer_stack_enabled:
                         self._queue_frame(colors)
             except Exception as e:
                 print(f'[driver] frame_reader: {e}', flush=True)
@@ -509,6 +509,108 @@ class Driver:
                     existing_held = set()
                 new_layers.append({'cfg': cfg, 'active': existing, 'held_keys': existing_held})
             self._reactive_layers = new_layers
+
+    def set_layer_config(self, layers, enabled):
+        """Receive full layer stack from JS. layers[0]=top, layers[-1]=bottom."""
+        with self._layer_stack_lock:
+            self._layer_stack_enabled = bool(enabled)
+            if not enabled:
+                self._layer_stack = []
+                return
+            now = time.monotonic()
+            new_stack = []
+            for i, cfg in enumerate(layers or []):
+                if not isinstance(cfg, dict): continue
+                layer = dict(cfg)
+                layer_type = cfg.get('type', 'static')
+                if layer_type == 'animation':
+                    if i < len(self._layer_stack) and self._layer_stack[i].get('type') == 'animation':
+                        layer['_frame_idx'] = self._layer_stack[i].get('_frame_idx', 0)
+                        layer['_frame_ts']  = self._layer_stack[i].get('_frame_ts', now)
+                    else:
+                        layer['_frame_idx'] = 0
+                        layer['_frame_ts']  = now
+                elif layer_type == 'reactive':
+                    effect = cfg.get('effect', 'highlight')
+                    if i < len(self._layer_stack) and self._layer_stack[i].get('type') == 'reactive' \
+                            and self._layer_stack[i].get('effect') == effect:
+                        layer['_active']    = self._layer_stack[i].get('_active', [] if effect in ('ripple','meteor','lightning') else {})
+                        layer['_held_keys'] = self._layer_stack[i].get('_held_keys', set())
+                    else:
+                        layer['_active']    = [] if effect in ('ripple','meteor','lightning') else {}
+                        layer['_held_keys'] = set()
+                new_stack.append(layer)
+            self._layer_stack = new_stack
+        # Mirror reactive layers so _on_key_event still works
+        with self._reactive_lock:
+            reactive = [l for l in self._layer_stack if l.get('type') == 'reactive']
+            self._reactive_enabled = bool(reactive)
+            self._reactive_layers  = [
+                {'cfg': l, 'active': l['_active'], 'held_keys': l['_held_keys']}
+                for l in reactive
+            ]
+
+    def _advance_animation_layers(self):
+        now = time.monotonic()
+        with self._layer_stack_lock:
+            for layer in self._layer_stack:
+                if layer.get('type') != 'animation': continue
+                frames = layer.get('frames', [])
+                if not frames: continue
+                idx = layer.get('_frame_idx', 0)
+                dur = frames[idx].get('duration', 100) / 1000.0
+                if now - layer.get('_frame_ts', now) >= dur:
+                    next_idx = (idx + 1) % len(frames)
+                    if next_idx == 0 and not layer.get('loop', True):
+                        pass  # stay on last frame
+                    else:
+                        layer['_frame_idx'] = next_idx
+                        layer['_frame_ts']  = now
+
+    def _build_composite_frame(self):
+        with self._layer_stack_lock:
+            now   = time.monotonic()
+            frame = {}
+            for layer in reversed(self._layer_stack):  # bottom first, top last
+                layer_type = layer.get('type', 'static')
+                opacity    = layer.get('opacity', 1.0)
+                if layer_type == 'static':
+                    for idx, rgb in layer.get('colors', {}).items():
+                        if isinstance(rgb, (list, tuple)) and len(rgb) >= 3:
+                            self._blend_into(frame, idx, rgb[0], rgb[1], rgb[2], opacity)
+                elif layer_type == 'animation':
+                    frames = layer.get('frames', [])
+                    if not frames: continue
+                    fidx   = layer.get('_frame_idx', 0)
+                    colors = frames[fidx].get('colors', {}) if fidx < len(frames) else {}
+                    for idx, rgb in colors.items():
+                        if isinstance(rgb, (list, tuple)) and len(rgb) >= 3:
+                            self._blend_into(frame, idx, rgb[0], rgb[1], rgb[2], opacity)
+                elif layer_type == 'reactive':
+                    active = layer.get('_active', {})
+                    effect = layer.get('effect', 'highlight')
+                    if effect == 'ripple':
+                        self._apply_ripple(frame, active, layer, now, opacity)
+                    elif effect == 'meteor':
+                        self._apply_meteor(frame, active, layer, now, opacity)
+                    elif effect == 'lightning':
+                        self._apply_lightning(frame, active, layer, now, opacity)
+                    else:
+                        self._apply_highlight(frame, active, layer, now, opacity)
+        return frame
+
+    @staticmethod
+    def _blend_into(frame, idx, r, g, b, alpha):
+        cur = frame.get(idx, [0, 0, 0])
+        if isinstance(cur, (list, tuple)):
+            cr, cg, cb = cur[0], cur[1], cur[2]
+        else:
+            cr, cg, cb = cur.get('r', 0), cur.get('g', 0), cur.get('b', 0)
+        frame[idx] = [
+            int(r * alpha + cr * (1 - alpha)),
+            int(g * alpha + cg * (1 - alpha)),
+            int(b * alpha + cb * (1 - alpha)),
+        ]
 
     def set_soundboard_cards(self, cards):
         """Update soundboard card list from UI. cards: [{id, combo:[vk,...], name}]"""
@@ -836,7 +938,10 @@ class Driver:
                     elif kind == 'release' and led in active:
                         active[led]['release_ts'] = now
 
-        frame = self._build_reactive_frame()
+        if self._layer_stack_enabled:
+            frame = self._build_composite_frame()
+        else:
+            frame = self._build_reactive_frame()
         self._queue_frame(frame)
 
     # ── Fade ticker ───────────────────────────────────────────────────────────
@@ -847,10 +952,13 @@ class Driver:
             tick += 1
             if tick % 100 == 0:
                 print(f'[driver] alive enabled={self._reactive_enabled} layers={len(self._reactive_layers)}', flush=True)
-            if not self._reactive_enabled:
-                continue
-            frame = self._build_reactive_frame()
-            self._queue_frame(frame)
+            if self._layer_stack_enabled:
+                self._advance_animation_layers()
+                frame = self._build_composite_frame()
+                self._queue_frame(frame)
+            elif self._reactive_enabled:
+                frame = self._build_reactive_frame()
+                self._queue_frame(frame)
 
     # ── Win32 keyboard hook ───────────────────────────────────────────────────
     def _hook_thread(self):
@@ -993,6 +1101,9 @@ class Driver:
                     elif cmd == 'REACTIVE_CFG':
                         print(f'[driver] got REACTIVE_CFG payload={payload}', flush=True)
                         self.set_reactive_config(payload.get('layers'), payload.get('enabled', False))
+                    elif cmd == 'LAYER_CFG':
+                        print(f'[driver] got LAYER_CFG enabled={payload.get("enabled")} layers={len(payload.get("layers",[]))}', flush=True)
+                        self.set_layer_config(payload.get('layers'), payload.get('enabled', False))
                     elif cmd == 'SOUNDBOARD_CFG':
                         self.set_soundboard_cards(payload.get('cards', []))
                     elif cmd == 'SOUNDBOARD_RECORDING':
