@@ -47,6 +47,8 @@ function _staticStreamTick() {
 // ── Apply / Save ──────────────────────────────────────────────────────────────
 async function applyToKeyboard() {
     if (!window.pywebview?.api) { if (typeof toast === 'function') toast('Run via python main.py to connect'); return; }
+    if (typeof _stopAllPlayback === 'function') _stopAllPlayback();
+    if (typeof stopCompositor === 'function') stopCompositor();
     const r = await window.pywebview.api.apply_colors(_buildFlashPayload());
     if (r?.ok) { if (typeof toast === 'function') toast('Applied to keyboard'); }
     else if (r) { if (typeof toast === 'function') toast(r.message); }
@@ -54,6 +56,8 @@ async function applyToKeyboard() {
 
 async function saveToFlash() {
     if (!window.pywebview?.api) { if (typeof toast === 'function') toast('Run via python main.py to connect'); return; }
+    if (typeof _stopAllPlayback === 'function') _stopAllPlayback();
+    if (typeof stopCompositor === 'function') stopCompositor();
     if (typeof toast === 'function') toast('Saving to flash...');
     const flatPayload = _buildFlashPayload();
     const r = await window.pywebview.api.save_to_flash(flatPayload);

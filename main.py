@@ -12,7 +12,7 @@ import winreg
 import subprocess as _subprocess
 import multiprocessing
 
-VERSION = 'v1.0.14'
+VERSION = 'v1.0.15'
 GITHUB_REPO = 'Punkster81/AULA-F108-Driver'
 
 # ── Update system ─────────────────────────────────────────────────────────────
@@ -698,10 +698,14 @@ class AnimationAPI:
                     'url': result['url'], 'notes': result['notes']}
         return {'ok': True, 'available': False}
 
-    def apply_update(self, url):
-        """Download new exe and apply update. App will restart automatically."""
-        threading.Thread(target=_download_and_apply_update, args=(url,), daemon=True).start()
-        return {'ok': True}
+    def open_url(self, url):
+        """Open a URL in the default browser."""
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            return {'ok': True}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
 
 
 
@@ -724,7 +728,6 @@ class SoundboardAPI:
             return data
         except Exception as e:
             print(f'[soundboard] Failed to load cards.json: {e}', flush=True)
-            # Try backup
             bak = p + '.bak'
             if os.path.exists(bak):
                 try:
@@ -740,19 +743,17 @@ class SoundboardAPI:
         p = self._sb_cards_path()
         tmp = p + '.tmp'
         bak = p + '.bak'
-        # Write to temp file first
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(cards, f, indent=2)
-        # Backup existing file
         if os.path.exists(p):
             try: os.replace(p, bak)
             except: pass
-        # Atomically move temp to final
         os.replace(tmp, p)
+
+    _cards_lock = threading.Lock()
 
     def _sync_driver(self, cards):
         def _extract_vk(entry):
-            # combo entries may be {code, vk} dicts or legacy plain ints
             if isinstance(entry, dict): return entry.get('vk', 0)
             return int(entry)
         _send_driver_cmd('SOUNDBOARD_CFG', {'cards': [
@@ -770,32 +771,16 @@ class SoundboardAPI:
         except Exception as e:
             return {'ok': False, 'cards': [], 'message': str(e)}
 
-    def cleanup_orphaned_sounds(self, active_paths):
-        """Delete sound files not referenced by any card."""
-        try:
-            d = sounds_dir()
-            active = set(os.path.normcase(p) for p in active_paths if p)
-            removed = []
-            for fname in os.listdir(d):
-                fpath = os.path.join(d, fname)
-                if os.path.isfile(fpath) and os.path.normcase(fpath) not in active:
-                    os.remove(fpath)
-                    removed.append(fname)
-            if removed:
-                print(f'[soundboard] Removed orphaned sounds: {removed}', flush=True)
-            return {'ok': True, 'removed': removed}
-        except Exception as e:
-            return {'ok': False, 'message': str(e)}
-
     def save_soundboard_card(self, card):
         try:
-            cards = self._load_cards()
-            idx = next((i for i,c in enumerate(cards) if c['id']==card['id']), None)
-            if idx is not None:
-                cards[idx] = card
-            else:
-                cards.append(card)
-            self._save_cards(cards)
+            with self._cards_lock:
+                cards = self._load_cards()
+                idx = next((i for i,c in enumerate(cards) if c['id']==card['id']), None)
+                if idx is not None:
+                    cards[idx] = card
+                else:
+                    cards.append(card)
+                self._save_cards(cards)
             self._sync_driver(cards)
             return {'ok': True}
         except Exception as e:
@@ -803,8 +788,19 @@ class SoundboardAPI:
 
     def delete_soundboard_card(self, card_id):
         try:
-            cards = [c for c in self._load_cards() if c['id'] != card_id]
-            self._save_cards(cards)
+            with self._cards_lock:
+                all_cards = self._load_cards()
+                deleted = next((c for c in all_cards if c['id'] == card_id), None)
+                cards = [c for c in all_cards if c['id'] != card_id]
+                self._save_cards(cards)
+            # Delete the associated sound file if it exists
+            if deleted and deleted.get('soundPath'):
+                try:
+                    if os.path.exists(deleted['soundPath']):
+                        os.remove(deleted['soundPath'])
+                        print(f'[soundboard] Deleted sound file: {deleted["soundPath"]}', flush=True)
+                except Exception as e:
+                    print(f'[soundboard] Failed to delete sound file: {e}', flush=True)
             self._sync_driver(cards)
             return {'ok': True}
         except Exception as e:
@@ -823,12 +819,39 @@ class SoundboardAPI:
             root.destroy()
             if not path:
                 return {'ok': False, 'cancelled': True}
+            # Delete existing sound file for this card if there is one
+            with self._cards_lock:
+                cards = self._load_cards()
+            existing = next((c for c in cards if c['id'] == card_id), None)
+            if existing and existing.get('soundPath'):
+                try:
+                    if os.path.exists(existing['soundPath']):
+                        os.remove(existing['soundPath'])
+                except Exception:
+                    pass
             import shutil
             dest_dir = sounds_dir()
             fname    = f'{card_id}_{os.path.basename(path)}'
             dest     = os.path.join(dest_dir, fname)
             shutil.copy2(path, dest)
             return {'ok': True, 'path': dest, 'filename': fname}
+        except Exception as e:
+            return {'ok': False, 'message': str(e)}
+
+    def cleanup_orphaned_sounds(self, active_paths):
+        """Delete sound files in the sounds dir not referenced by any active card."""
+        try:
+            d = sounds_dir()
+            active = set(os.path.normcase(p) for p in active_paths if p)
+            removed = []
+            for fname in os.listdir(d):
+                fpath = os.path.join(d, fname)
+                if os.path.isfile(fpath) and os.path.normcase(fpath) not in active:
+                    os.remove(fpath)
+                    removed.append(fname)
+            if removed:
+                print(f'[soundboard] Removed orphaned sounds: {removed}', flush=True)
+            return {'ok': True, 'removed': removed}
         except Exception as e:
             return {'ok': False, 'message': str(e)}
 

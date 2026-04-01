@@ -195,21 +195,26 @@ async function initSoundboard() {
     if (hasPyAPI()) {
         // Run orphan cleanup once on startup with the full stable card list
         try { await window.pywebview.api.cleanup_orphaned_sounds(_sbCards.map(c => c.soundPath).filter(Boolean)); } catch(e) {}
-        // Retry sync until driver confirms cards received (up to 5s)
-        for (let i = 0; i < 10; i++) {
+        // Sync cards to driver — retry a few times to handle slow driver startup
+        for (let i = 0; i < 6; i++) {
             await new Promise(r => setTimeout(r, 500));
-            try {
-                const r = await window.pywebview.api.sync_soundboard_to_driver();
-                if (r?.ok) break;
-            } catch(e) {}
+            try { await window.pywebview.api.sync_soundboard_to_driver(); } catch(e) {}
         }
     }
 }
 
 // UI init — called when soundboard tab is first opened
 async function initSoundboardUI() {
-    if (_sbUiLoaded) return;
+    if (_sbUiLoaded) {
+        // Re-check cards for missing sounds and clean orphans every time tab is opened
+        await loadSoundboardCards();
+        if (hasPyAPI()) {
+            try { await window.pywebview.api.cleanup_orphaned_sounds(_sbCards.map(c => c.soundPath).filter(Boolean)); } catch(e) {}
+        }
+        return;
+    }
     _sbUiLoaded = true;
+    await loadSoundboardCards();
     await _checkVbAudio();
     await _populateAudioDevices();
     setTimeout(_sbShowAllComboDim, 100);
@@ -365,7 +370,7 @@ function renderSoundboardCards() {
             <div class="sb-card-actions">
                 <button class="sb-btn sb-record-btn" id="sbRec_${card.id}" onclick="startRecording('${card.id}')">⏺ Record Key</button>
                 <button class="sb-btn sb-sound-btn ${hasSound?'has-sound':''} ${soundMissing?'sound-missing':''}" onclick="pickSound('${card.id}')">
-                    ${soundMissing?'⚠ File missing — click to replace':hasSound?'🔊 '+(card.soundFilename.startsWith(card.id+'_')?card.soundFilename.slice(card.id.length+1):card.soundFilename):'📁 Add Sound'}
+                    ${soundMissing ? '⚠ File missing — click to replace' : hasSound ? '🔊 ' + (card.soundFilename && card.soundFilename.startsWith(card.id+'_') ? card.soundFilename.slice(card.id.length+1) : (card.soundFilename||'sound')) : '📁 Add Sound'}
                 </button>
             </div>
             <div class="sb-vol-row">
@@ -560,6 +565,23 @@ async function pickSound(id) {
 }
 
 // ── Audio playback ────────────────────────────────────────────────────────────
+
+// Persistent AudioContext cache per sinkId — avoids autoplay suspension issues
+const _sbAudioContexts = {};
+async function _getAudioContext(sinkId) {
+    const key = sinkId || 'default';
+    if (!_sbAudioContexts[key] || _sbAudioContexts[key].state === 'closed') {
+        const ctx = new AudioContext();
+        if (sinkId) { try { await ctx.setSinkId(sinkId); } catch(e) {} }
+        _sbAudioContexts[key] = ctx;
+    }
+    const ctx = _sbAudioContexts[key];
+    if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch(e) {}
+    }
+    return ctx;
+}
+
 async function _loadAudioBuffer(card) {
     if (_sbAudioBuffers[card.id]) return _sbAudioBuffers[card.id];
     if (!hasPyAPI() || !card.soundPath) return null;
@@ -569,9 +591,10 @@ async function _loadAudioBuffer(card) {
         const binary = atob(r.data);
         const bytes  = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const ctx    = new AudioContext();
-        const buffer = await ctx.decodeAudioData(bytes.buffer);
-        await ctx.close();
+        // Use a temporary context just for decoding
+        const tmpCtx = new AudioContext();
+        const buffer = await tmpCtx.decodeAudioData(bytes.buffer);
+        await tmpCtx.close();
         _sbAudioBuffers[card.id] = { buffer, mime: r.mime };
         return _sbAudioBuffers[card.id];
     } catch(e) {
@@ -582,10 +605,7 @@ async function _loadAudioBuffer(card) {
 
 async function _playOnDevice(buffer, volume, sinkId) {
     try {
-        const ctx = new AudioContext();
-        if (sinkId) {
-            try { await ctx.setSinkId(sinkId); } catch(e) {}
-        }
+        const ctx = await _getAudioContext(sinkId);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         const gain = ctx.createGain();
@@ -593,7 +613,6 @@ async function _playOnDevice(buffer, volume, sinkId) {
         source.connect(gain);
         gain.connect(ctx.destination);
         source.start(0);
-        source.onended = () => ctx.close();
     } catch(e) {
         console.error('[soundboard] playback failed:', e);
     }
